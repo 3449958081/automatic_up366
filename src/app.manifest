@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="TxwExtract.app" />
+  <!-- 注意：高 DPI 由项目属性 <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode> 统一配置，
+       此处不要再写 dpiAware/dpiAwareness，否则 WinForms 会报 WFAC010 且可能冲突。
+       统一物理像素坐标：屏幕截图/OCR/点击的坐标体系必须一致，否则高分屏下点击偏移。 -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <!-- v2.1.18 起：改为 asInvoker（而非 requireAdministrator）。
+             原因：requireAdministrator 时若 .lnk 快捷方式未勾"以管理员身份运行"，
+             双击图标会以 asInvoker CreateProcess 直接被系统拒绝（错误码 740，
+             弹"无法执行文件"），进程根本起不来，Main() 内的自我提权代码没有执行机会。
+             现在进程必然能启动，由 Program.Main 入口检测管理员 token：非管理员则用
+             ShellExecuteEx(Verb=runas) 重新启动自身（弹 UAC 提权），用户点"是"后以
+             管理员身份运行，即可向管理员运行的天学网客户端注入 SendInput/PostMessage
+             输入（否则 UIPI 静默拦截导致"截图正常但点击无效"）。 -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>

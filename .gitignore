@@ -1,0 +1,14 @@
+# 构建产物
+bin/
+obj/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# 运行数据 / 本地日志
+*.log
+startup_state.txt

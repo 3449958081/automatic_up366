@@ -1,0 +1,822 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>天学网答案提取</title>
+<style>
+  :root{
+    /* 品牌墨蓝（与开屏商标/落地 logo 同源，勿改） */
+    --pri:#3a63f3;--pri-d:#2c4ed8;--pri-soft:#e9effe;--pri-line:#cfddfd;
+    /* 纸面与墨色 */
+    --bg:#f0f3f9;--card:#fff;--bd:#e3e8f2;--bd-strong:#ccd5e5;
+    --t:#141c2e;--sub:#68738c;
+    /* 语义色（沿用原语义：--ok=答案红 / --new=新增与正确绿 / --warn=琥珀） */
+    --ok:#d23b2e;--ok-soft:#fdecea;
+    --new:#0e8f61;--new-soft:#dcf5ea;
+    --old-soft:#eef1f6;
+    --warn:#96600a;--warn-soft:#fff3da;
+    --shadow:0 1px 2px rgba(18,28,54,.05),0 3px 10px rgba(18,28,54,.06);
+    --shadow-h:0 2px 6px rgba(18,28,54,.08),0 12px 30px rgba(18,28,54,.13);
+    --r:12px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:'Segoe UI','Microsoft YaHei UI','Microsoft YaHei',system-ui,sans-serif;background:var(--bg);color:var(--t);line-height:1.55;font-size:14px;-webkit-font-smoothing:antialiased}
+  /* 氛围层：三组径向品牌光晕，营造"纸面仪器"的纵深（fixed 不随滚动） */
+  body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:
+    radial-gradient(920px 480px at 10% -6%,rgba(58,99,243,.10),transparent 62%),
+    radial-gradient(820px 440px at 96% -2%,rgba(107,139,255,.10),transparent 58%),
+    radial-gradient(720px 520px at 55% 112%,rgba(58,99,243,.05),transparent 60%)}
+  /* ---- 顶栏（几何被开屏动画落点锁定：高58 / 左右padding22 / logo 32，勿动） ---- */
+  header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.88);backdrop-filter:blur(10px) saturate(1.5);border-bottom:1px solid var(--bd);padding:0 22px;height:58px;display:flex;align-items:center;gap:12px}
+  .logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#3a63f3,#6b8bff);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(15,23,42,.15);flex:none}
+  .logo svg{width:62%;height:62%;display:block}
+  header h1{font-size:16.5px;margin:0;font-weight:800;letter-spacing:.3px}
+  .ver{display:inline-block;vertical-align:2.5px;margin-left:7px;padding:1.5px 8px;border-radius:99px;background:var(--pri-soft);border:1px solid var(--pri-line);color:var(--pri);font-size:10.5px;font-weight:800;letter-spacing:.4px;font-family:Consolas,'Cascadia Mono',monospace}
+  header .sub{color:var(--sub);font-size:12px;margin-top:1px}
+  .head-sp{flex:1}
+  /* ---- 选项卡 ---- */
+  .tabs-wrap{position:sticky;top:58px;z-index:19;background:linear-gradient(rgba(240,243,249,.95),rgba(240,243,249,.72));backdrop-filter:blur(8px);padding:12px 22px 0}
+  .tabs{display:inline-flex;background:rgba(224,231,244,.8);border:1px solid var(--bd);border-radius:13px;padding:4px;gap:3px;box-shadow:inset 0 1px 3px rgba(18,28,54,.07)}
+  .tab{position:relative;padding:7px 22px;border:none;background:none;border-radius:9px;font-size:13.5px;color:var(--sub);cursor:pointer;font-weight:700;letter-spacing:.2px;transition:color .18s,background .18s,box-shadow .18s;font-family:inherit}
+  .tab:hover{color:var(--t)}
+  .tab.active{background:linear-gradient(180deg,#fff,#fafcff);color:var(--pri);box-shadow:0 1px 2px rgba(18,28,54,.10),0 4px 12px rgba(58,99,243,.14)}
+  .tab.active::after{content:'';position:absolute;left:22px;right:22px;bottom:3.5px;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--pri),#6b8bff)}
+  /* ---- 布局 ---- */
+  main{padding:16px 22px 44px;max-width:1360px;margin:0 auto}
+  .tabpane{display:none}
+  .tabpane.active{display:block}
+  /* 切页交错入场：直接子元素依次上浮 */
+  .tabpane.active>*{animation:rise .34s cubic-bezier(.22,.8,.3,1) both}
+  .tabpane.active>*:nth-child(2){animation-delay:.05s}
+  .tabpane.active>*:nth-child(3){animation-delay:.1s}
+  .tabpane.active>*:nth-child(4){animation-delay:.15s}
+  .tabpane.active>*:nth-child(n+5){animation-delay:.2s}
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);box-shadow:var(--shadow);padding:14px 16px;margin-bottom:14px}
+  .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .toolbar + .toolbar{margin-top:10px}
+  label{font-size:12.5px;color:#3d4657;font-weight:700;letter-spacing:.02em}
+  /* ---- 控件 ---- */
+  input[type=text],input[type=number]{height:34px;padding:0 11px;border:1px solid var(--bd-strong);border-radius:9px;font-size:13px;background:#fff;color:var(--t);transition:border-color .15s,box-shadow .15s;outline:none;font-family:inherit}
+  input[type=text]:focus,input[type=number]:focus{border-color:var(--pri);box-shadow:0 0 0 3.5px rgba(58,99,243,.14)}
+  #dir{min-width:340px;flex:1;max-width:520px;font-family:Consolas,'Cascadia Mono',monospace;font-size:12.5px}
+  select{height:34px;padding:0 9px;border:1px solid var(--bd-strong);border-radius:9px;font-size:13px;background:#fff;color:var(--t);outline:none;cursor:pointer;font-family:inherit;transition:border-color .15s,box-shadow .15s}
+  select:focus{border-color:var(--pri);box-shadow:0 0 0 3.5px rgba(58,99,243,.14)}
+  textarea{width:100%;border:1px solid var(--bd-strong);border-radius:var(--r);padding:12px;font-size:13px;font-family:Consolas,'Cascadia Mono','Courier New',monospace;background:#fff;color:var(--t);outline:none;resize:vertical;transition:border-color .15s,box-shadow .15s;line-height:1.65}
+  textarea:focus{border-color:var(--pri);box-shadow:0 0 0 3.5px rgba(58,99,243,.14)}
+  button{height:34px;padding:0 15px;border:1px solid var(--bd-strong);border-radius:9px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;color:#33405a;transition:all .16s;font-family:inherit;box-shadow:0 1px 2px rgba(18,28,54,.05)}
+  button:hover{background:#f6f9ff;border-color:#b7c4dd;transform:translateY(-1px);box-shadow:0 3px 9px rgba(18,28,54,.09)}
+  button:active{transform:translateY(0) scale(.97)}
+  button.primary{background:linear-gradient(180deg,#4a72ff,var(--pri));color:#fff;border-color:transparent;box-shadow:0 2px 7px rgba(58,99,243,.38),inset 0 1px 0 rgba(255,255,255,.2)}
+  button.primary:hover{background:linear-gradient(180deg,#4068f6,var(--pri-d));border-color:transparent;box-shadow:0 5px 16px rgba(58,99,243,.45),inset 0 1px 0 rgba(255,255,255,.2)}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+  .icon-btn{width:30px;height:30px;padding:0;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+  /* ---- 表格 ---- */
+  .tbl-wrap{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);overflow:auto;box-shadow:var(--shadow)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{border-bottom:1px solid var(--bd);padding:9.5px 12px;text-align:left;vertical-align:top}
+  th{background:linear-gradient(180deg,#f8fafd,#f2f5fb);font-weight:800;color:#4e5a72;font-size:12px;letter-spacing:.05em;position:sticky;top:0;z-index:2;border-bottom:1px solid var(--bd-strong)}
+  tbody tr{transition:background .12s}
+  tbody tr:hover{background:#f4f8ff}
+  tr:last-child td{border-bottom:none}
+  /* ---- 徽标 ---- */
+  .badge{display:inline-block;padding:2.5px 10px;border-radius:99px;font-size:11px;font-weight:800;letter-spacing:.02em;white-space:nowrap;border:1px solid transparent}
+  .badge.new{background:var(--new-soft);color:var(--new);border-color:#bfe7d2}
+  .badge.old{background:var(--old-soft);color:var(--sub);border-color:#dde3ec}
+  .badge.listen{background:var(--pri-soft);color:var(--pri);border-color:var(--pri-line)}
+  .badge.warn{background:var(--warn-soft);color:var(--warn);border-color:#f2ddb2}
+  /* ---- 内容块 ---- */
+  .hint{color:var(--sub);font-size:12.5px;line-height:1.65}
+  .hint b{color:#33405a}
+  .info-card{background:linear-gradient(180deg,#eef3ff,#e9effe);border:1px solid var(--pri-line);border-left:3px solid var(--pri);border-radius:var(--r);padding:10px 14px;font-size:12.5px;color:#33507e;line-height:1.7;margin-bottom:14px}
+  .info-card b{color:#1f3d7a}
+  .empty{color:var(--sub);text-align:center;padding:38px;font-size:13px}
+  .loading{color:var(--sub);padding:12px;font-size:13px}
+  .loading::after{content:'';animation:dots 1.2s steps(4) infinite}
+  @keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
+  .course-block{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:14px;overflow:hidden;box-shadow:var(--shadow);transition:box-shadow .18s,transform .18s}
+  .course-block:hover{box-shadow:var(--shadow-h);transform:translateY(-1px)}
+  .course-head{padding:11px 16px;background:linear-gradient(180deg,#f8fafd,#f4f7fc);border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .course-head .t{font-weight:800;font-size:13.5px;letter-spacing:.02em}
+  .course-head .m{color:var(--sub);font-size:12px}
+  .opts div{padding:1.5px 0}
+  .opts .ok{color:var(--new);font-weight:700}
+  .ans{font-weight:800;color:var(--ok);white-space:nowrap}
+  .ana{color:#3d4657;max-width:460px;white-space:pre-wrap;font-size:12.5px}
+  .dl{display:flex;gap:6px}
+  .dl button{height:28px;padding:0 11px;font-size:12px;border-radius:8px}
+  code{background:#edf1f8;padding:1.5px 6px;border-radius:6px;font-size:12px;font-family:Consolas,'Cascadia Mono',monospace}
+  .row-actions{display:flex;gap:6px;align-items:center}
+  .src-link{display:inline-flex;align-items:center;gap:3px;margin-top:5px;padding:3.5px 11px;background:var(--pri-soft);color:var(--pri);border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;transition:all .15s;border:1px solid var(--pri-line)}
+  .src-link:hover{background:#dbe5fd;text-decoration:none;transform:translateY(-1px)}
+  .chk-wrap{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:#3d4657;font-weight:500;cursor:pointer;user-select:none}
+  input[type=checkbox]{width:15px;height:15px;accent-color:var(--pri);cursor:pointer}
+  /* ---- 抓包日志（深色仪器终端） ---- */
+  .console{background:linear-gradient(180deg,#0e1729,#0a1120);color:#9ccdf5;padding:14px 16px;border-radius:var(--r);font-size:12px;overflow:auto;max-height:56vh;white-space:pre-wrap;font-family:Consolas,'Cascadia Mono',monospace;line-height:1.7;margin-top:12px;border:1px solid #1d2b47;box-shadow:inset 0 1px 0 rgba(255,255,255,.04),var(--shadow)}
+  /* ---- Toast ---- */
+  #toasts{position:fixed;bottom:22px;right:22px;z-index:100;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+  .toast{background:linear-gradient(180deg,#202c47,#141c2e);color:#fff;padding:10px 16px;border-radius:11px;font-size:13px;box-shadow:0 8px 28px rgba(10,16,32,.4);opacity:0;transform:translateY(10px) scale(.98);transition:all .28s cubic-bezier(.22,.8,.3,1);max-width:420px;line-height:1.5;border:1px solid rgba(255,255,255,.08)}
+  .toast.show{opacity:1;transform:none}
+  .toast.ok{background:linear-gradient(180deg,#12a574,#0e8f61)}
+  .toast.err{background:linear-gradient(180deg,#e04c3d,#d23b2e)}
+  /* ---- 密钥弹窗 ---- */
+  .modal-mask{position:fixed;inset:0;background:rgba(12,18,34,.5);z-index:90;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);animation:fadein .15s}
+  .modal{background:#fff;border-radius:16px;width:min(560px,92vw);max-height:86vh;overflow:auto;box-shadow:0 24px 70px rgba(10,16,32,.4);border:1px solid var(--bd);animation:pop .24s cubic-bezier(.2,.9,.3,1.15)}
+  @keyframes pop{from{opacity:0;transform:scale(.96) translateY(10px)}to{opacity:1;transform:none}}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px 12px;border-bottom:1px solid var(--bd)}
+  .modal-head b{font-size:15px;letter-spacing:.02em}
+  .modal-body{padding:16px 20px 20px}
+  .key-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--bd);border-radius:9px;margin-bottom:6px;font-size:13px;background:#fbfcfe;transition:border-color .15s}
+  .key-row:hover{border-color:var(--bd-strong)}
+  .key-row code{flex:1;font-size:12.5px}
+  .key-row .del{margin-left:auto}
+  /* ---- OCR 拖拽区 ---- */
+  .ocr-drop{border:2px dashed #c2cde6;border-radius:var(--r);padding:20px;text-align:center;cursor:pointer;background:#fbfcff;transition:all .18s;margin-top:8px}
+  .ocr-drop:hover{border-color:var(--pri);background:var(--pri-soft);box-shadow:0 0 0 4px rgba(58,99,243,.07)}
+  .ocr-drop.drag{border-color:var(--pri);background:var(--pri-soft);transform:scale(1.01);box-shadow:0 0 0 5px rgba(58,99,243,.12)}
+  .ocr-preview{max-width:300px;max-height:240px;border-radius:9px;display:none;margin-top:8px;box-shadow:var(--shadow-h)}
+  .form-row{display:flex;gap:8px;margin-top:12px}
+  .form-row input{flex:1;min-width:0}
+  .divider{height:1px;background:var(--bd);margin:16px -20px 0}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#c3cde0;border-radius:99px;border:2px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:#9fb0cc;border:2px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-track{background:transparent}
+</style></head><body>
+<div id="firstRun" class="modal-mask" style="display:none">
+  <div class="modal">
+    <div class="modal-head"><b>使用前须知</b></div>
+    <div class="modal-body">
+      <div class="hint" style="line-height:1.9">
+        · 本工具仅供<b>个人学习与复习</b>使用，请勿传播答案或用于商业用途；题目内容版权归天学网及其内容提供方所有。<br>
+        · 功能入口在顶部选项卡：<b>自动回答 / 搜题对答案 / 扫描提取 / 抓包拉题库</b>。<br>
+        · 首次点【启动客户端】会引导下载安装天学网客户端，安装目录由你自选（与程序本体分立存放）。<br>
+        · 详细使用说明见程序目录下《使用须知.txt》。
+      </div>
+      <div class="form-row"><button class="primary" style="flex:1;height:38px" onclick="firstRunDone()">我已知晓，开始使用</button></div>
+    </div>
+  </div>
+</div>
+<header>
+  <div class="logo"><svg viewBox="0 0 100 100" fill="none"><path d="M27 53 L44 70 L76 33" stroke="#fff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+  <div>
+    <h1>天学网答案提取<span class="ver">v1.0.0</span></h1>
+    <div class="sub">本地纯算解密 .u3enc · 提取听力/题目答案</div>
+  </div>
+  <div class="head-sp"></div>
+  <button onclick="openKeys()">密钥管理</button>
+</header>
+<div class="tabs-wrap">
+  <div class="tabs">
+    <button class="tab active" data-tab="auto" onclick="showTab('auto')">自动回答</button>
+    <button class="tab" data-tab="bank" onclick="showTab('bank')">搜题对答案</button>
+    <button class="tab" data-tab="scan" onclick="showTab('scan')">扫描提取</button>
+    <button class="tab" data-tab="cap" onclick="showTab('cap')">抓包拉题库</button>
+  </div>
+</div>
+<main>
+<div id="tab-bank" class="tabpane">
+  <div class="card ocr-card">
+    <div class="toolbar">
+      <span style="font-size:13px;font-weight:700;color:#3d4657">导入长图自动识别</span>
+      <button onclick="ocrSelect()">选择图片</button>
+      <button class="primary" id="ocrRunBtn" onclick="ocrRun()" disabled>识别并填入</button>
+      <span id="ocrStatus" class="hint"></span>
+    </div>
+    <div id="ocrDrop" class="ocr-drop" onclick="if(!ocrBase64)ocrSelect()" ondragover="ocrDragOver(event)" ondragleave="ocrDragLeave(event)" ondrop="ocrDrop(event)">
+      <input type="file" id="ocrFile" accept="image/*" onchange="ocrOnChange(event)" style="display:none">
+      <div id="ocrHint" class="hint">点击此处或把试卷长图拖到这里（支持 PNG/JPG；使用系统自带 Windows OCR 引擎,首次调用约 2-5 秒）</div>
+      <img id="ocrPreview" class="ocr-preview" alt="">
+    </div>
+  </div>
+  <div class="card">
+    <div class="toolbar">
+      <label>题库题数 <b id="bankCount" style="color:var(--pri)">-</b></label>
+      <button class="primary" onclick="bankMatch()">匹配对答案</button>
+      <button onclick="bankRebuild()">重建索引</button>
+      <span id="bankStatus" class="hint"></span>
+    </div>
+  </div>
+  <div class="card" style="padding:12px">
+    <textarea id="bankPaper" style="height:200px" placeholder="把试卷文本粘贴进来，例如：
+1. What are the two speakers talking about?
+A. Real laws.
+B. The latest physics.
+C. The school security."></textarea>
+  </div>
+  <div id="bankResult"></div>
+</div>
+<div id="tab-scan" class="tabpane">
+  <div class="card">
+    <div class="toolbar">
+      <label>资源目录</label>
+      <input id="dir" type="text" placeholder="D:\Up366StudentFiles\resources">
+      <button class="primary" onclick="doScan()">扫描</button>
+      <button onclick="setBaseline()">设为基线</button>
+      <button onclick="extractSelected()">提取选中</button>
+    </div>
+    <div class="toolbar">
+      <label class="chk-wrap"><input type="checkbox" id="pollChk" onchange="togglePoll(this)"> 自动轮询</label>
+      <select id="pollInt" onchange="if(window.pollEnabled)togglePoll(document.getElementById('pollChk'))">
+        <option value="5000">每 5 秒</option><option value="10000" selected>每 10 秒</option><option value="20000">每 20 秒</option><option value="30000">每 30 秒</option>
+      </select>
+      <span id="pollStat" class="hint"></span>
+      <span style="flex:1"></span>
+      <span id="status" class="hint"></span>
+    </div>
+  </div>
+  <div id="courseList"></div>
+  <div id="results" style="margin-top:14px"></div>
+</div>
+<div id="tab-auto" class="tabpane active">
+  <div class="card">
+    <div class="toolbar">
+      <label>目标窗口</label>
+      <select id="autoWin" style="min-width:260px"></select>
+      <button onclick="autoRefresh()">刷新窗口</button>
+      <button onclick="autoLaunch()">启动客户端</button>
+      <button onclick="pickClientDir()">选择位置…</button>
+      <button class="primary" id="autoStartBtn" onclick="autoStart()">开始自动回答</button>
+      <button id="autoStopBtn" onclick="autoStop()" disabled>停止</button>
+    </div>
+    <div class="toolbar">
+      <label>轮询间隔</label>
+      <input id="autoInterval" type="number" min="5" max="600" step="1" style="width:76px" value="20"
+             title="单位：秒。每次检查屏幕变化的时间，可自由填写；最低 5 秒（OCR 识别一轮通常需数秒，填更短会与上一轮识别重叠）"/>
+      <span class="hint">秒</span>
+      <label style="margin-left:14px">最低置信度</label>
+      <select id="minConf" style="width:250px">
+        <option value="high">高（仅题干+选项双命中才点）</option>
+        <option value="mid" selected>中（高置信 + 中置信，推荐）</option>
+        <option value="low">低（全部都点，含未命中与兜底匹配）</option>
+      </select>
+      <span class="hint">只有置信度 ≥ 所选档位的匹配才会被自动点击；选“低”则所有匹配结果都会处理</span>
+      <span id="autoStat" class="hint"></span>
+    </div>
+  </div>
+  <div class="card" style="padding:12px">
+    <div style="font-size:13px;font-weight:700;color:#3d4657;margin-bottom:6px">运行日志</div>
+    <pre id="autoLog" class="console" style="max-height:300px">(未开始)</pre>
+  </div>
+  <div class="card" style="padding:12px">
+    <div style="font-size:13px;font-weight:700;color:#3d4657;margin-bottom:6px">最近识别到的屏幕文字（供核对）</div>
+    <div id="autoPreview" class="hint" style="white-space:pre-wrap"></div>
+  </div>
+</div>
+<div id="tab-cap" class="tabpane">
+  <div class="card">
+    <div class="toolbar">
+      <button class="primary" onclick="capStart()">启动抓包代理</button>
+      <button onclick="capLaunch()">打开客户端(带代理)</button>
+      <button onclick="capTest()">测试代理</button>
+      <button onclick="capList()">刷新日志</button>
+      <button onclick="capStop()">停止代理</button>
+      <span id="capStatus" class="hint"></span>
+    </div>
+  </div>
+  <pre id="capLog" class="console">(日志为空，先启动代理)</pre>
+</div>
+</main>
+<div id="toasts"></div>
+<div id="keyModal" class="modal-mask" style="display:none" onclick="if(event.target===this)closeKeys()">
+  <div class="modal">
+    <div class="modal-head"><b>密钥管理</b><button class="icon-btn" onclick="closeKeys()">✕</button></div>
+    <div class="modal-body">
+      <div class="hint">解密完全在本地进行（AES-128-CBC，IV 为文件前 16 字节）。若天学网更换密钥导致解密失败，可<b>从客户端自动查找</b>新密钥：程序会扫描客户端 up366.exe 中的候选串，用本地样本文件逐一试解，能解开的即新密钥并自动保存。也可以手动粘贴别处获得的密钥。</div>
+      <div style="margin:12px 0 6px;font-size:13px;font-weight:700;color:#3d4657">当前密钥（<span id="keyCount">-</span> 个）</div>
+      <div id="keyList"></div>
+      <div class="divider"></div>
+      <div class="form-row">
+        <input id="newKey" type="text" placeholder="手动粘贴新密钥（24 位 base64，形如 XXXXXX…==）">
+        <button onclick="addKey()">添加</button>
+      </div>
+      <div class="form-row">
+        <input id="exePath" type="text" placeholder="客户端 up366.exe 路径（留空则自动查找常用位置）">
+        <button class="primary" onclick="discoverKeys()">从客户端自动查找</button>
+      </div>
+      <div id="keyMsg" class="hint" style="margin-top:10px"></div>
+    </div>
+  </div>
+</div>
+<script>
+// ================= WebView2 桥接 =================
+// 原版代码通过 fetch('/api/...') 与后端通信；此处把 fetch 替换为 postMessage 请求-响应
+// （WebView2 最标准可靠的通道：JS postMessage → C# WebMessageReceived → 处理 → PostWebMessageAsJson 回传）。
+// 完全异步，不阻塞 UI 线程，无 host object 代理的各种限制。
+let __seq = 0; const __pending = {};
+window.chrome.webview.addEventListener('message', e => {
+  let m = null;
+  try { m = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch(_){ return; }
+  const p = __pending[m.id];
+  if (!p) return;
+  delete __pending[m.id];
+  try { p(JSON.parse(m.data)); } catch(_){ p({ok:false, msg:'后端响应解析失败'}); }
+});
+function __call(path, args){
+  return new Promise(resolve => {
+    const id = ++__seq;
+    __pending[id] = resolve;
+    try { window.chrome.webview.postMessage(JSON.stringify({id, path, args: args||{}})); }
+    catch(e){ delete __pending[id]; resolve({ok:false, msg:'postMessage 失败: '+e.message}); }
+  });
+}
+const fetch = async (url, opts)=>{
+  opts = opts||{};
+  const q = url.split('?');
+  const path = q[0];
+  const p = new URLSearchParams(q[1]||'');
+  let body = {};
+  if(opts.body){ try{ body = JSON.parse(opts.body); }catch(_){ body = {}; } }
+  let j;
+  try {
+    switch(path){
+      case '/api/defaultdir': j = await __call('/api/defaultdir', {}); break;
+      case '/api/scan': j = await __call('/api/scan', {dir: p.get('dir')||''}); break;
+      case '/api/baseline': j = await __call('/api/baseline', {dir: body.dir||''}); break;
+      case '/api/extract': j = await __call('/api/extract', {dir: body.dir||'', ids: body.ids||[]}); break;
+      case '/api/bank/answer': j = await __call('/api/bank/answer', {dir: body.dir||'', paper: body.paper||''}); break;
+      case '/api/ocr': j = await __call('/api/ocr', {base64: body.base64||''}); break;
+      case '/api/auto/windows': j = await __call('/api/auto/windows', {}); break;
+      case '/api/auto/launch': j = await __call('/api/auto/launch', {}); break;
+      case '/api/auto/start': j = await __call('/api/auto/start', {title: body.title||'', proc: body.proc||'', intervalMs: body.intervalMs||20000, minConf: body.minConf||'mid', dir: body.dir||''}); break;
+      case '/api/auto/stop': j = await __call('/api/auto/stop', {}); break;
+      case '/api/auto/status': j = await __call('/api/auto/status', {}); break;
+      case '/api/auto/conf':
+        if(opts.method==='POST') j = await __call('/api/auto/conf', {minConf: body.minConf||'mid', intervalMs: parseInt(body.intervalMs,10)||20000});
+        else j = await __call('/api/auto/conf', {});
+        break;
+      case '/api/capture/start': j = await __call('/api/capture/start', {}); break;
+      case '/api/capture/stop': j = await __call('/api/capture/stop', {}); break;
+      case '/api/capture/launch': j = await __call('/api/capture/launch', {}); break;
+      case '/api/capture/log': j = await __call('/api/capture/log', {}); break;
+      case '/api/capture/test': j = await __call('/api/capture/test', {}); break;
+      case '/api/keys': j = await __call('/api/keys', {}); break;
+      case '/api/keys/add': j = await __call('/api/keys/add', {key: body.key||''}); break;
+      case '/api/keys/del': j = await __call('/api/keys/del', {key: body.key||''}); break;
+      case '/api/keys/discover': j = await __call('/api/keys/discover', {dir: body.dir||'', exe: body.exe||''}); break;
+      case '/api/firstrun': j = await __call('/api/firstrun', opts.method==='POST' ? {done:true} : {}); break;
+      default: j = {ok:false, msg:'未知接口 '+path}; window.__frDefault = path;
+    }
+  } catch(e){
+    j = {ok:false, msg:'后端调用失败: '+(e && e.message ? e.message : e)};
+  }
+  return { json: async ()=>j, text: async ()=>JSON.stringify(j) };
+};
+// 查看题库源文件：弹层内 iframe 展示（原版是另开标签页，WebView2 内改为模态框）
+async function openSource(f){
+  let j;
+  try { j = await __call('/api/bank/source', {f: decodeURIComponent(f)}); }
+  catch(e){ toast('读取源文件失败: '+e.message, 'err'); return; }
+  if(!j || !j.html){ toast('读取源文件失败', 'err'); return; }
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask';
+  mask.style.zIndex = 95;
+  mask.innerHTML = '<div class="modal" style="width:min(920px,94vw)"><div class="modal-head"><b>题库源文件（解密后）</b><button onclick="this.closest(\'.modal-mask\').remove()">关闭</button></div><div class="modal-body" style="padding:0"><iframe style="width:100%;height:70vh;border:none" srcdoc="'+j.html.replace(/"/g,'&quot;')+'"></iframe></div></div>';
+  mask.onclick = (e)=>{ if(e.target===mask) mask.remove(); };
+  document.body.appendChild(mask);
+}
+let curDir='', courses=[];
+let pollTimer=null, pollEnabled=false, pollIntervalMs=10000, lastSnap=new Map(), autoNewIds=new Set();
+async function init(){
+  const r=await fetch('/api/defaultdir'); const j=await r.json(); document.getElementById('dir').value=j.dir; curDir=j.dir;
+  // 恢复搜题页持久化状态（试卷文本 / 匹配结果），跳转"查看源文件"返回后不丢
+  const sp=localStorage.getItem('txw_bankPaper'); if(sp) document.getElementById('bankPaper').value=sp;
+  const sr=localStorage.getItem('txw_bankResult'); if(sr){ try{ renderBankResult(JSON.parse(sr)); }catch(_){ } }
+  document.getElementById('bankPaper').addEventListener('input', e=>{ try{ localStorage.setItem('txw_bankPaper', e.target.value); }catch(_){ } }); // 输入即存
+  // 地址栏 hash 恢复选项卡（源文件页"返回搜题"即回到此 tab）；默认打开主打功能「自动回答」
+  const h=(location.hash||'').replace('#','');
+  showTab(['scan','bank','auto','cap'].includes(h)?h:'auto', true);
+  initAutoConf();
+  doScan();
+  // 原生开屏遮罩由 C# 端 CapturePreview 确认页面真实绘制后自行撤下，页面无需上报
+  setTimeout(checkFirstRun, 300);
+}
+// 首次启动须知（仅一次；确认后写入配置，之后不再弹）
+async function checkFirstRun(){
+  try{
+    const r=await fetch('/api/firstrun'); const j=await r.json();
+    if(j.show){ window.__fr = 'resp:' + JSON.stringify(j); const m=document.getElementById('firstRun'); if(m) m.style.display='flex'; }
+    else { window.__fr = 'resp:' + JSON.stringify(j); }
+  }catch(e){ window.__fr = 'err:' + (e && e.message ? e.message : e); }
+}
+function firstRunDone(){
+  try{ fetch('/api/firstrun',{method:'POST'}); }catch(_){ }
+  const m=document.getElementById('firstRun'); if(m) m.style.display='none';
+}
+// 轮询间隔：界面以秒为单位，config/后端为毫秒；下限 5 秒（OCR 识别一轮通常耗时，填更短无意义）
+const AUTO_MIN_SEC = 5;
+function ivSec(){ const v=parseInt(document.getElementById('autoInterval').value,10); return isNaN(v)?20:Math.max(AUTO_MIN_SEC,v); }
+function ivMs(){ return ivSec()*1000; }
+
+// 最低置信度：载入已保存偏好 + 改动即保存
+async function initAutoConf(){
+  const sel=document.getElementById('minConf');
+  if(!sel) return;
+  try{
+    const r=await fetch('/api/auto/conf'); const j=await r.json();
+    if(j.ok){
+      if(j.minConf) sel.value=j.minConf;
+      if(j.intervalMs && document.getElementById('autoInterval')) document.getElementById('autoInterval').value=String(Math.round(j.intervalMs/1000));
+    }
+  }catch(_){ }
+  try{ const v=localStorage.getItem('txw_minConf'); if(v) sel.value=v; }catch(_){ }
+  sel.addEventListener('change', async ()=>{
+    try{ localStorage.setItem('txw_minConf', sel.value); }catch(_){ }
+    try{ const r=await fetch('/api/auto/conf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({minConf:sel.value, intervalMs:ivMs()})}); const j=await r.json(); if(j.ok) toast(j.msg,'ok'); }catch(_){ }
+  });
+  const iv=document.getElementById('autoInterval');
+  if(iv) iv.addEventListener('change', ()=>{
+    if(parseInt(iv.value,10) < AUTO_MIN_SEC){ iv.value=String(AUTO_MIN_SEC); toast('轮询间隔已自动调整为最短 '+AUTO_MIN_SEC+' 秒','err'); }
+    try{ fetch('/api/auto/conf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({minConf:sel.value, intervalMs:ivMs()})}); }catch(_){ }
+  });
+}
+function setStatus(t){ document.getElementById('status').textContent=t; }
+async function doScan(){
+  curDir=document.getElementById('dir').value.trim();
+  if(!curDir){return;}
+  setStatus('扫描中…');
+  const r=await fetch('/api/scan?dir='+encodeURIComponent(curDir));
+  const j=await r.json();
+  // 手动扫描: 重置自动轮询的"新"追踪（与基线机制各自独立）
+  autoNewIds.clear();
+  lastSnap=new Map((j.courses||[]).map(c=>[c.id,c.mtimeMs]));
+  applyScan(j);
+}
+function applyScan(j){
+  if(j.error){ setStatus(j.error); document.getElementById('courseList').innerHTML='<div class="card empty">'+j.error+'</div>'; return; }
+  // 轮询刷新时保留用户已勾选状态
+  const checked=[...document.querySelectorAll('.ck:checked')].map(x=>x.dataset.id);
+  courses=j.courses;
+  setStatus('共 '+j.count+' 个课程'+(j.hasBaseline?'（已设基线）':'（未设基线，全部视为新）')+(pollEnabled?' · 自动轮询中':''));
+  renderList();
+  checked.forEach(id=>{ const cb=document.querySelector('.ck[data-id="'+String(id).replace(/"/g,'\\"')+'"]'); if(cb) cb.checked=true; });
+}
+async function doPoll(){
+  if(!curDir || !pollEnabled) return;
+  try{
+    const r=await fetch('/api/scan?dir='+encodeURIComponent(curDir));
+    const j=await r.json();
+    if(j.error) return;
+    const now=new Map();
+    for(const c of (j.courses||[])){
+      const prev=lastSnap.get(c.id);
+      if(prev===undefined || c.mtimeMs>prev) autoNewIds.add(c.id); // 新出现的目录, 或内容被更新
+      now.set(c.id, c.mtimeMs);
+      c.isNew = (c.isNew || autoNewIds.has(c.id));
+    }
+    lastSnap=now;
+    applyScan(j);
+    setPollStat();
+  }catch(e){}
+}
+function togglePoll(cb){
+  pollIntervalMs=parseInt(document.getElementById('pollInt').value,10)||10000;
+  if(cb.checked){ startPoll(); } else { stopPoll(); }
+}
+function startPoll(){
+  pollEnabled=true;
+  lastSnap=new Map(courses.map(c=>[c.id,c.mtimeMs]));
+  setPollStat();
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer=setInterval(doPoll, pollIntervalMs);
+}
+function stopPoll(){
+  pollEnabled=false;
+  if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
+  document.getElementById('pollStat').textContent='';
+}
+function setPollStat(){
+  if(!pollEnabled){ document.getElementById('pollStat').textContent=''; return; }
+  const t=new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  document.getElementById('pollStat').textContent='轮询中 · 上次 '+t+' · 自动标记新到 '+autoNewIds.size+' 个';
+}
+function renderList(){
+  const el=document.getElementById('courseList');
+  if(!courses.length){ el.innerHTML='<div class="card empty">该目录下没有找到任何课程文件夹（index.html.u3enc 或 paper.xml.u3enc）。</div>'; return; }
+  let h='<div class="tbl-wrap"><table><thead><tr><th style="width:34px"><input type="checkbox" onclick="toggleAll(this)"></th><th>课程ID</th><th>题型/状态</th><th>小题</th><th>可解密</th><th>下载时间</th><th>状态</th></tr></thead><tbody>';
+  for(const c of courses){
+    const dt=new Date(c.mtime).toLocaleString('zh-CN',{hour12:false});
+    let decBadge = c.extractable ? '<span class="badge listen">✓ 可解密</span>'
+                 : (c.hasPaper ? '<span class="badge warn">有题无答案</span>' : '<span class="badge old">仅壳</span>');
+    h+='<tr>'
+      +'<td><input type="checkbox" class="ck" data-id="'+c.id+'"'+(c.isNew&&c.extractable?' checked':'')+(c.extractable?'':' disabled title="仅壳: 请在客户端打开此练习并加载后重试"')+'></td>'
+      +'<td style="font-family:Consolas,monospace;font-size:12.5px">'+c.id+'</td>'
+      +'<td>'+(c.courseType||'-')+(c.kind==='flipbook'&&c.choiceCount?(' · '+c.choiceCount+'选择'):'')+'</td>'
+      +'<td>'+(c.qCount||'-')+'</td>'
+      +'<td>'+decBadge+'</td>'
+      +'<td style="white-space:nowrap;color:var(--sub);font-size:12.5px">'+dt+'</td>'
+      +'<td>'+(c.isNew?'<span class="badge new">新</span>':'<span class="badge old">旧</span>')+'</td>'
+      +'</tr>';
+  }
+  h+='</tbody></table></div>';
+  el.innerHTML=h;
+}
+function toggleAll(cb){ document.querySelectorAll('.ck').forEach(x=>{ if(!x.disabled) x.checked=cb.checked; }); }
+async function setBaseline(){
+  setStatus('设置基线中…');
+  const r=await fetch('/api/baseline',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dir:curDir})});
+  const j=await r.json();
+  setStatus(j.ok?('基线已设置，标记 '+j.set+' 个为旧'):('失败'));
+  toast(j.ok?('基线已设置，'+j.set+' 个课程标记为旧'):'基线设置失败', j.ok?'ok':'err');
+  doScan();
+}
+function selectedIds(){ return [...document.querySelectorAll('.ck:checked')].map(x=>x.dataset.id); }
+async function extractSelected(){
+  const ids=selectedIds();
+  if(!ids.length){ setStatus('请先勾选课程'); toast('请先勾选要提取的课程','err'); return; }
+  setStatus('解密提取中…');
+  const r=await fetch('/api/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dir:curDir,ids})});
+  const j=await r.json();
+  setStatus('已提取 '+ids.length+' 个课程');
+  renderResults(j.courses);
+  const errs=(j.courses||[]).filter(c=>c.error);
+  if(errs.length) toast(errs.length+' 个课程提取失败：'+errs[0].error.slice(0,80),'err');
+}
+function escSrv(s){ s = (s===null||s===undefined)?'':String(s); return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtTime(s){ try { return new Date(s).toLocaleString('zh-CN',{hour12:false}); } catch { return s||'-'; } }
+function renderResults(list){
+  const el=document.getElementById('results');
+  let h='';
+  for(const c of list){
+    if(c.error){ h+='<div class="course-block"><div class="course-head"><span class="t">'+escSrv(c.id)+'</span><span class="m" style="color:var(--ok)">错误: '+escSrv(c.error)+'</span></div></div>'; continue; }
+    const qs=c.questions||[];
+    h+='<div class="course-block"><div class="course-head">'
+      +'<span><span class="t">'+escSrv(c.id)+'</span> '
+      +(c.courseType?'<span class="badge listen">'+escSrv(c.courseType)+'</span> ':'')
+      +'<span class="m">共 '+qs.length+' 题，听力 '+c.listenCount+' 题 | 下载时间: '+fmtTime(c.downloadTime)+'</span></span>'
+      +'<span class="dl"><button onclick="dl(this,'+JSON.stringify(c.id)+',\'json\')">下载JSON</button>'
+      +'<button onclick="dl(this,'+JSON.stringify(c.id)+',\'html\')">下载HTML</button></span>'
+      +'</div><div style="overflow:auto"><table><thead><tr><th>题号</th><th>题型</th><th>题干</th><th>选项(✓正确)</th><th>答案</th><th>解析/原文</th></tr></thead><tbody>';
+    for(const q of qs){
+      const opts=q.options.map(o=>'<div class="'+(o.id===q.ans?'ok':'')+'">'+escSrv(o.id)+'. '+escSrv(o.text)+(o.id===q.ans?' ✓':'')+'</div>').join('');
+      h+='<tr><td>'+escSrv(q.no)+'</td><td>'+escSrv(q.type||'')+(q.src?'<br><span class="badge listen" style="font-size:11px">'+escSrv(q.src)+'</span>':'')+'</td><td>'+escSrv(q.qt)+'</td><td class="opts">'+opts+'</td><td class="ans">'+escSrv(q.ans)+'</td><td class="ana">'+escSrv(q.analysis)+'</td></tr>';
+    }
+    h+='</tbody></table></div></div>';
+  }
+  el.innerHTML=h;
+  window._last=list;
+}
+function dl(btn,id,fmt){
+  const c=(window._last||[]).find(x=>x.id===id); if(!c)return;
+  let blob,text,name;
+  if(fmt==='json'){ text=JSON.stringify(c,null,2); name=id+'.json'; blob=new Blob([text],{type:'application/json'}); }
+  else { text=toHTML(c); name=id+'.html'; blob=new Blob([text],{type:'text/html'}); }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click();
+}
+function toHTML(c){
+  let rows='';
+  for(const q of (c.questions||[])){
+    const opts=q.options.map(o=>'<div class="'+(o.id===q.ans?'ok':'')+'">'+escSrv(o.id)+'. '+escSrv(o.text)+(o.id===q.ans?' ✓':'')+'</div>').join('');
+    rows+='<tr><td>'+escSrv(q.no)+'</td><td>'+escSrv(q.type||'')+(q.src?'<br>('+escSrv(q.src)+')':'')+'</td><td>'+escSrv(q.qt)+'</td><td>'+opts+'</td><td class="ans">'+escSrv(q.ans)+'</td><td>'+escSrv(q.analysis)+'</td></tr>';
+  }
+  return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>'+escSrv(c.id)+'</title>'
+    +'<style>body{font-family:system-ui,sans-serif;margin:20px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top}.ok{color:#0f8a5f;font-weight:700}.ans{color:#cf3328;font-weight:700}</style>'
+    +'</head><body><h2>'+escSrv(c.id)+(c.courseType?' ('+escSrv(c.courseType)+')':'')+'</h2>'
+    +'<p style="color:#666;font-size:13px;margin:4px 0 14px">下载时间: '+(c.downloadTime?fmtTime(c.downloadTime):'-')+'</p>'
+    +'<table><thead><tr><th>题号</th><th>题型</th><th>题干</th><th>选项</th><th>答案</th><th>解析/原文</th></tr></thead><tbody>'+rows+'</tbody></table></body></html>';
+}
+// ---- 选项卡 + hash 导航（浏览器前进/后退也可用）----
+function showTab(t, skipHash){
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
+  document.querySelectorAll('.tabpane').forEach(p=>p.classList.toggle('active',p.id==='tab-'+t));
+  if(t==='auto' && !window._autoWinLoaded){ window._autoWinLoaded=true; autoRefresh(); }
+  if(!skipHash){ try{ history.replaceState(null,'','#'+t); }catch(_){ try{ location.hash=t; }catch(_){ } } }
+}
+window.addEventListener('hashchange',()=>{ const h=(location.hash||'').replace('#',''); if(['scan','bank','auto','cap'].includes(h)) showTab(h,true); });
+async function bankRebuild(){ BANK=null; document.getElementById('bankStatus').textContent='索引已重置，下次匹配时重建'; toast('题库索引已重置，下次匹配时自动重建'); }
+async function bankMatch(){
+  const paper=document.getElementById('bankPaper').value;
+  const dir=document.getElementById('dir').value.trim()||curDir;
+  const el=document.getElementById('bankResult');
+  if(!paper.trim()){ el.innerHTML='<div class="card empty">请先粘贴试卷文本</div>'; return; }
+  el.innerHTML='<div class="card loading">匹配中</div>';
+  const r=await fetch('/api/bank/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dir,paper})});
+  const j=await r.json();
+  // 持久化：试卷文本 + 匹配结果，防止跳转/刷新丢失
+  try{ localStorage.setItem('txw_bankPaper', paper); localStorage.setItem('txw_bankResult', JSON.stringify(j)); }catch(_){}
+  renderBankResult(j);
+}
+function renderBankResult(j){
+  document.getElementById('bankCount').textContent=j.bankCount;
+  document.getElementById('bankStatus').textContent='题库 '+j.bankCount+' 题';
+  const mappedN=(j.questions||[]).filter(q=>q.mapped).length;
+  let h=(mappedN?'<div class="info-card" style="margin-top:-6px">其中 '+mappedN+' 题已按<b>选项内容</b>对应到本题选项（选项顺序被天学网打乱也不影响）——答案字母旁的绿色文字即本题中的原选项。</div>':'');
+  h+='<div class="tbl-wrap"><table><thead><tr><th>#</th><th>题干/选项(✓为本题答案)</th><th>置信度</th><th>命中来源</th><th>题库原题答案</th><th>本题答案(字母+内容)</th></tr></thead><tbody>';
+  for(const q of (j.questions||[])){
+    const cls=q.conf==='高置信'?'badge new':(q.conf==='未命中'?'badge old':'badge warn');
+    // 选项列表：按本题字母位置高亮答案项（绿色 ✓）
+    let optsHtml='';
+    if(q.opts&&q.opts.length){
+      const optDivs=q.opts.map((o,i)=>{
+        const hit=q.targetAns&&'ABCD'[i]===q.targetAns;
+        return '<div class="'+(hit?'ok':'')+'">'+(hit?'✓ ':'')+escSrv(o)+(hit?' <span style="font-weight:400;color:#667089;font-size:11px">← 本题答案</span>':'')+'</div>';
+      });
+      optsHtml='<div class="opts" style="font-size:12px;color:var(--sub);margin-top:4px">'+optDivs.join('')+'</div>';
+    }
+    // 本题答案单元格：优先 本题字母+本题内容；映射失败时给 题库字母+题库内容 并提示按内容核对
+    let ansCell='—';
+    if(q.conf!=='未命中'){
+      if(q.targetAns){
+        ansCell='<span class="ans" style="font-size:16px">'+escSrv(q.targetAns)+'</span>'
+          +'<div style="color:var(--new);font-size:12.5px;margin-top:2px">'+escSrv(q.targetText||'')+'</div>';
+      } else {
+        ansCell='<span class="ans">'+escSrv(q.ans)+'</span><span style="color:#667089;font-size:11px">(题库)</span>'
+          +'<div style="color:#3d4657;font-size:12.5px;margin-top:2px">'+escSrv(q.bankAnsText||'')+'</div>'
+          +'<div style="color:var(--warn);font-size:11px;margin-top:2px">本题选项与题库文本不一致，请按内容核对</div>';
+      }
+    }
+    h+='<tr><td>'+q.no+'</td>'
+      +'<td>'+escSrv(q.qt)+optsHtml+'</td>'
+      +'<td><span class="'+cls+'">'+escSrv(q.conf)+'</span></td>'
+      +'<td>'+(q.src?'<span class="badge listen">'+escSrv(q.src)+'</span><br><span style="font-size:12px;color:var(--sub)">'+escSrv(q.srcQt)+'</span>':'-')
+      +(q.srcFile?'<br><a class="src-link" href="javascript:void(0)" onclick="openSource(\''+encodeURIComponent(q.srcFile)+'\')">查看源文件 ↗</a>':'')+'</td>'
+      +'<td>'+(q.ans?escSrv(q.ans)+(q.bankAnsText?' <span style="color:var(--new)">('+escSrv(q.bankAnsText)+')</span>':''):'-')+'</td>'
+      +'<td style="min-width:170px">'+ansCell+'</td></tr>';
+  }
+  h+='</tbody></table></div>';
+  document.getElementById('bankResult').innerHTML=h;
+}
+// ---- OCR ----
+let ocrBase64 = null;
+function ocrSelect(){ document.getElementById('ocrFile').click(); }
+function ocrDragOver(e){ e.preventDefault(); const d=document.getElementById('ocrDrop'); if(d)d.classList.add('drag'); }
+function ocrDragLeave(e){ const d=document.getElementById('ocrDrop'); if(d)d.classList.remove('drag'); }
+function ocrDrop(e){ e.preventDefault(); const d=document.getElementById('ocrDrop'); if(d)d.classList.remove('drag'); const f=e.dataTransfer.files&&e.dataTransfer.files[0]; if(f) ocrLoadFile(f); }
+function ocrOnChange(e){ const f=e.target.files&&e.target.files[0]; if(f) ocrLoadFile(f); }
+function ocrLoadFile(f){
+  if(!f.type||!f.type.startsWith('image/')){ toast('请选择图片文件(PNG/JPG)','err'); return; }
+  if(f.size>30*1024*1024){ toast('图片太大(>30MB),请压缩后再试','err'); return; }
+  const r=new FileReader();
+  r.onload=()=>{
+    ocrBase64=r.result;
+    const prev=document.getElementById('ocrPreview');
+    prev.src=r.result; prev.style.display='inline-block';
+    document.getElementById('ocrHint').style.display='none';
+    document.getElementById('ocrRunBtn').disabled=false;
+    document.getElementById('ocrStatus').textContent='已选择: '+f.name+' · '+Math.round(f.size/1024)+' KB · 准备就绪';
+  };
+  r.readAsDataURL(f);
+}
+async function ocrRun(){
+  if(!ocrBase64){ toast('请先选择图片','err'); return; }
+  const btn=document.getElementById('ocrRunBtn'); btn.disabled=true;
+  document.getElementById('ocrStatus').textContent='OCR 识别中…（首次调用约 2-5 秒,请勿关闭页面）';
+  try{
+    const r=await fetch('/api/ocr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({base64:ocrBase64})});
+    const j=await r.json();
+    if(!j.ok){ toast('识别失败: '+j.msg,'err'); document.getElementById('ocrStatus').textContent='识别失败: '+j.msg; return; }
+    const ta=document.getElementById('bankPaper');
+    ta.value=j.joined;
+    try{ localStorage.setItem('txw_bankPaper',j.joined); }catch(_){}
+    document.getElementById('ocrStatus').textContent='识别完成: '+j.count+' 行 · 引擎='+j.engine+' · 已自动填入并触发匹配';
+    toast('识别完成 '+j.count+' 行,自动匹配中','ok');
+    bankMatch();
+  }catch(e){
+    toast('识别失败: '+e.message,'err');
+    document.getElementById('ocrStatus').textContent='识别失败: '+e.message;
+  } finally { btn.disabled=false; }
+}
+// ---- 自动回答 ----
+let autoTimer = null;
+async function autoRefresh(){
+  const sel=document.getElementById('autoWin');
+  const old=sel.value;
+  sel.innerHTML='<option value="">加载中…</option>';
+  try{
+    const r=await fetch('/api/auto/windows'); const j=await r.json();
+    sel.innerHTML='<option value="">— 请选择目标窗口 —</option>';
+    (j.windows||[]).forEach(w=>{
+      const opt=document.createElement('option');
+      opt.value=w.title;
+      opt.textContent=w.title+(w.pid?'  [PID '+w.pid+']':'');
+      sel.appendChild(opt);
+    });
+    // 默认选中天学网【客户端】窗口：标题含“天学网”且排除工具自身的 WebUI（标题含“答案提取”）
+    if(!old){
+      const opts=[...sel.options];
+      const hit=opts.find(o=>/天学网/i.test(o.textContent) && !/答案提取/i.test(o.textContent));
+      if(hit){ sel.value=hit.value; toast('已自动选中: '+hit.textContent,'ok'); }
+    } else { sel.value=old; }
+  }catch(e){ toast('刷新窗口列表失败: '+e.message,'err'); }
+}
+async function autoLaunch(){
+  const r=await fetch('/api/auto/launch',{method:'POST'}); const j=await r.json();
+  if(j.ok){ toast(j.msg,'ok'); }
+  else if(j.needInstall){
+    // 首次使用：自动下载并安装到用户自选目录（与程序分立）
+    toast('未检测到客户端，正在准备自动安装向导…','ok');
+    try{ await __call('/api/auto/install', {}); }catch(e){ toast('发起安装失败: '+e.message,'err'); }
+  } else { toast(j.msg,'err'); }
+  setTimeout(()=>autoRefresh(), 4000);
+}
+// 手动自选客户端位置（写入配置，下次自动使用）
+async function pickClientDir(){
+  try{
+    const j=await __call('/api/auto/pickdir', {});
+    toast(j.msg, j.ok?'ok':'err');
+  }catch(e){ toast('选择位置失败: '+e.message,'err'); }
+}
+async function autoStart(){
+  const sel=document.getElementById('autoWin');
+  const win=sel.value;
+  if(!win){ toast('请先选择目标窗口（客户端打开后点【刷新窗口】）','err'); return; }
+  // 由用户自行确认窗口（可能是标题也可能是进程名，服务端按进程名优先）
+  const intervalMs=ivMs();
+  const minConf=document.getElementById('minConf').value;
+  const dir=document.getElementById('dir').value.trim()||curDir;
+  document.getElementById('autoStartBtn').disabled=true;
+  document.getElementById('autoStopBtn').disabled=false;
+  toast('开始自动回答（点击后请在客户端中确认开始测试）','ok');
+  const r=await fetch('/api/auto/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:win,proc:'',intervalMs,minConf,dir})});
+  const j=await r.json();
+  if(!j.ok){ document.getElementById('autoStartBtn').disabled=false; document.getElementById('autoStopBtn').disabled=true; toast(j.msg,'err'); return; }
+  autoPoll();
+}
+async function autoStop(){
+  document.getElementById('autoStartBtn').disabled=false;
+  document.getElementById('autoStopBtn').disabled=true;
+  const r=await fetch('/api/auto/stop',{method:'POST'});
+  toast('已请求停止','ok');
+  autoPoll();
+}
+async function autoPoll(){
+  try{
+    const r=await fetch('/api/auto/status'); const j=await r.json();
+    document.getElementById('autoLog').textContent=(j.log||[]).join('\n')||'(未开始)';
+    const dur=j.startedAt?((Date.now()-j.startedAt)/1000).toFixed(0)+'s':'';
+    document.getElementById('autoStat').textContent=j.running
+      ?('运行中 · 第 '+j.round+' 轮 · 已点击 '+j.clicked+' · 界面稳定 '+j.unchanged+' 轮 · '+dur)
+      :(j.round||j.endDetected?('已停止'+(j.endDetected?'(检测到成绩页✅)':'')+' · 共 '+j.round+' 轮 · 点击 '+j.clicked+' · '+dur):'');
+    const pv=(j.preview||[]).map(l=>l.t).join('\n');
+    document.getElementById('autoPreview').textContent=pv||'(暂无)';
+    if(autoTimer) clearTimeout(autoTimer);
+    autoTimer=setTimeout(autoPoll, 1000);
+  }catch(e){ if(autoTimer) clearTimeout(autoTimer); autoTimer=setTimeout(autoPoll, 3000); }
+}
+// ---- 抓包 ----
+async function capStart(){ const r=await fetch('/api/capture/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); capList(); }
+async function capStop(){ const r=await fetch('/api/capture/stop',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); }
+async function capLaunch(){ const r=await fetch('/api/capture/launch',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); }
+async function capList(){ const r=await fetch('/api/capture/log'); const j=await r.json(); document.getElementById('capLog').textContent=j.log; }
+async function capTest(){ const el=document.getElementById('capStatus'); el.textContent='测试中…'; const r=await fetch('/api/capture/test'); const j=await r.json(); el.textContent='【测试】'+j.msg; toast(j.msg, j.ok?'ok':'err'); capList(); }
+// ---- Toast ----
+function toast(msg, type){
+  const wrap=document.getElementById('toasts');
+  const el=document.createElement('div');
+  el.className='toast '+(type||'');
+  el.textContent=msg;
+  wrap.appendChild(el);
+  setTimeout(()=>el.classList.add('show'),10);
+  setTimeout(()=>{ el.classList.remove('show'); setTimeout(()=>el.remove(),300); }, 3600);
+}
+// ---- 密钥管理 ----
+async function openKeys(){
+  document.getElementById('keyModal').style.display='flex';
+  document.getElementById('keyMsg').textContent='';
+  await refreshKeys();
+}
+function closeKeys(){ document.getElementById('keyModal').style.display='none'; }
+async function refreshKeys(){
+  const r=await fetch('/api/keys'); const j=await r.json();
+  document.getElementById('keyCount').textContent=j.count;
+  let h='';
+  for(const k of j.keys){
+    h+='<div class="key-row"><code>'+escSrv(k.masked)+'</code>'
+      +(k.active?'<span class="badge new">在用</span>':'')
+      +(k.builtin?'<span class="badge listen">内置</span>':'<button class="del" onclick="delKey(\''+k.key+'\')">删除</button>')
+      +'</div>';
+  }
+  document.getElementById('keyList').innerHTML=h||'<div class="hint">（无）</div>';
+}
+async function addKey(){
+  const inp=document.getElementById('newKey');
+  const k=inp.value.trim();
+  const msgEl=document.getElementById('keyMsg');
+  if(!k){ msgEl.textContent='请先粘贴密钥'; return; }
+  const r=await fetch('/api/keys/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
+  const j=await r.json();
+  msgEl.textContent=j.msg;
+  toast(j.msg, j.ok?'ok':'err');
+  if(j.ok){ inp.value=''; refreshKeys(); }
+}
+async function delKey(k){
+  const r=await fetch('/api/keys/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
+  const j=await r.json();
+  document.getElementById('keyMsg').textContent=j.msg;
+  toast(j.msg, j.ok?'ok':'err');
+  refreshKeys();
+}
+async function discoverKeys(){
+  const msgEl=document.getElementById('keyMsg');
+  msgEl.textContent='正在扫描客户端并试解样本，请稍候…';
+  const dir=document.getElementById('dir').value.trim()||curDir;
+  const exe=document.getElementById('exePath').value.trim();
+  const r=await fetch('/api/keys/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dir,exe})});
+  const j=await r.json();
+  msgEl.textContent=j.msg;
+  toast(j.msg, j.ok&&j.found?'ok':(j.ok?'':'err'));
+  refreshKeys();
+}
+init();
+</script>
+</body></html>

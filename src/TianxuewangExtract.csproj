@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- net8.0-windows10.0.19041.0 提供原生 WinRT 投影（Windows.Media.Ocr / Windows.Graphics.Capture），无需额外 NuGet -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <AssemblyName>天学网答案提取</AssemblyName>
+    <RootNamespace>TxwExtract</RootNamespace>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- AOT 预编译：减少首次启动 JIT 时间（发布体积略增，启动明显加快） -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- WebView2 元包同时带 WinForms/Wpf 程序集，造成 MSB3277 版本解析噪音（不影响产物），屏蔽 -->
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Windows OCR 需要 GDI 位图互操作 -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 原版界面（开发期直接改 web/index.html；运行时优先读外置文件，缺失时回退嵌入资源） -->
+    <EmbeddedResource Include="..\web\index.html" LogicalName="TxwExtract.web.index.html" />
+    <Content Include="..\web\index.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>web\index.html</Link>
+    </Content>
+  </ItemGroup>
+
+</Project>
