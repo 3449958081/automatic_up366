@@ -166,6 +166,11 @@ public sealed class MainForm : Form
             _bridge.RunOnUi = a => BeginInvoke(a);
             TraceLog("InitWeb: message bridge ready");
 
+            // 版本徽章联动：csproj <Version> → 程序集版本 → 文档创建前注入页面（外置/嵌入两条加载路径都生效）
+            string appVer = typeof(MainForm).Assembly.GetName().Version?.ToString(3) ?? "";
+            if (appVer.Length > 0)
+                _ = _web.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync($"window.__APP_VER={JsonSerializer.Serialize(appVer)};");
+
             _web.CoreWebView2.NavigationStarting += (_, e) => TraceLog("NavigationStarting: " + (e.Uri ?? "?"));
             _web.CoreWebView2.SourceChanged += (_, _) => TraceLog("SourceChanged");
 

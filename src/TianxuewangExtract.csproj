@@ -14,6 +14,8 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyName>天学网答案提取</AssemblyName>
     <RootNamespace>TxwExtract</RootNamespace>
+    <!-- 全项目唯一版本号源：程序集/文件版本、webui 徽章（运行时注入）、安装包（iss 读产物）全部由此派生 -->
+    <Version>1.0.14</Version>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
     <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>false</SelfContained>

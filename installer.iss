@@ -4,8 +4,17 @@
 ; 编译：ISCC.exe installer.iss
 
 #define MyAppName "天学网答案提取"
-#define MyAppVersion "1.0.13"
+; 版本号与前后端联动：唯一源是 src\TianxuewangExtract.csproj 的 <Version>。
+; webui 徽章在运行时由 C# 从程序集版本注入；安装包则在构建期直接读取编译产物的
+; 文件版本（dotnet publish 已把 csproj 的 <Version> 写进 exe 元数据），杜绝 iss 手写版本漂移。
+; 前置条件：先 dotnet publish 再 ISCC（本仓库构建流程即如此）。
 #define MyAppExe "天学网答案提取.exe"
+#define AppFileVersion GetVersionNumbersString(SourcePath + "publish\\" + MyAppExe)
+#if AppFileVersion == ""
+  #error Publish exe not found or has no version info. Run "dotnet publish" before ISCC.
+#endif
+; FileVersion 为四段（1.0.14.0），取前三段作为产品版本
+#define MyAppVersion Copy(AppFileVersion, 1, RPos(".", AppFileVersion) - 1)
 
 [Setup]
 AppId={{8F3B2C41-5E62-4A8D-B7E0-7E0A1C2D3E4F}
@@ -27,7 +36,7 @@ SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=src\app.ico
 UninstallDisplayIcon={app}\{#MyAppExe}
-VersionInfoVersion=1.0.13.0
+VersionInfoVersion={#MyAppVersion}.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription={#MyAppName} 安装程序
 ShowLanguageDialog=no

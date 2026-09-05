@@ -160,7 +160,7 @@
 <header>
   <div class="logo"><svg viewBox="0 0 100 100" fill="none"><path d="M27 53 L44 70 L76 33" stroke="#fff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
   <div>
-    <h1>天学网答案提取</h1>
+    <h1>天学网答案提取<span class="ver" id="appVer" style="display:none"></span></h1>
     <div class="sub">本地纯算解密 .u3enc · 提取听力/题目答案</div>
   </div>
   <div class="head-sp"></div>
@@ -378,6 +378,9 @@ async function openSource(f){
 let curDir='', courses=[];
 let pollTimer=null, pollEnabled=false, pollIntervalMs=10000, lastSnap=new Map(), autoNewIds=new Set();
 async function init(){
+  // 版本徽章：C# 导航前经 ExecuteScript 注入 window.__APP_VER（版本唯一源=csproj），此处只负责渲染
+  const renderVer=()=>{ const v=window.__APP_VER; const el=document.getElementById('appVer'); if(v&&el){ el.textContent='v'+v; el.style.display=''; } };
+  renderVer();
   const r=await fetch('/api/defaultdir'); const j=await r.json(); document.getElementById('dir').value=j.dir; curDir=j.dir;
   // 恢复搜题页持久化状态（试卷文本 / 匹配结果），跳转"查看源文件"返回后不丢
   const sp=localStorage.getItem('txw_bankPaper'); if(sp) document.getElementById('bankPaper').value=sp;
