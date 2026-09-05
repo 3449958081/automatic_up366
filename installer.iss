@@ -4,7 +4,7 @@
 ; 编译：ISCC.exe installer.iss
 
 #define MyAppName "天学网答案提取"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.13"
 #define MyAppExe "天学网答案提取.exe"
 
 [Setup]
@@ -27,7 +27,7 @@ SolidCompression=yes
 WizardStyle=modern
 SetupIconFile=src\app.ico
 UninstallDisplayIcon={app}\{#MyAppExe}
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.0.13.0
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription={#MyAppName} 安装程序
 ShowLanguageDialog=no

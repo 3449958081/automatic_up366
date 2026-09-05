@@ -50,18 +50,18 @@ public static class OcrService
         }
     }
 
-    public static async Task<List<OcrLine>> RecognizeAsync(Bitmap bmp)
+    public static async Task<List<OcrLine>> RecognizeAsync(Bitmap bmp, int psm = 3, string lang = "chi_sim+eng")
     {
         if (bmp == null) return new List<OcrLine>();
         ProbeTess();
         if (_tessExe == null)
             throw new InvalidOperationException("内置 Tesseract 引擎缺失：" + TessExePath + "（安装包不完整，请重新安装）");
-        return await Task.Run(() => TessRecognize(bmp, _tessExe, Path.GetDirectoryName(_tessExe)!));
+        return await Task.Run(() => TessRecognize(bmp, _tessExe, Path.GetDirectoryName(_tessExe)!, psm, lang));
     }
 
     private sealed record Word(string Text, int Left, int Top, int Right, int Bottom, int Block, int Par, int Line);
 
-    private static List<OcrLine> TessRecognize(Bitmap bmp, string tessExe, string tessDir)
+    private static List<OcrLine> TessRecognize(Bitmap bmp, string tessExe, string tessDir, int psm, string lang)
     {
         string tmp = Path.Combine(Path.GetTempPath(), "txw_ocr_" + Guid.NewGuid().ToString("N") + ".png");
         string outBase = Path.ChangeExtension(tmp, null);   // 去掉 .png，tesseract 写 outBase.tsv
@@ -71,7 +71,7 @@ public static class OcrService
             var psi = new ProcessStartInfo
             {
                 FileName = tessExe,
-                Arguments = $"\"{tmp}\" \"{outBase}\" --psm 3 -l chi_sim+eng tsv",
+                Arguments = $"\"{tmp}\" \"{outBase}\" --psm {psm} -l {lang} tsv",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardError = true,

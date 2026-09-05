@@ -3,6 +3,7 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Diagnostics;
+using System.Threading;
 
 namespace TxwExtract.Core;
 
@@ -57,6 +58,7 @@ public static class WinApi
     public static bool ClickWindow(IntPtr hwnd, int relX, int relY)
     {
         if (hwnd == IntPtr.Zero) return false;
+        EnsureForeground(hwnd);
         // 前台模式（天学网客户端为 Chromium 自绘窗口，PostMessage 对其不可靠）：
         // 窗口外框原点相对坐标 → 屏幕坐标 → SendInput 真实点击（Chromium/Electron 必响应）。
         // 自动回答启动时已 Activate 目标窗口，用户做题时客户端本就在前台，因此前台点击成立。
@@ -88,6 +90,7 @@ public static class WinApi
     public static bool ScrollWindow(IntPtr hwnd, int deltaLines)
     {
         if (hwnd == IntPtr.Zero) return false;
+        EnsureForeground(hwnd);
         GetWindowRect(hwnd, out var r);
         int mx = (r.Left + r.Right) / 2, my = (r.Top + r.Bottom) / 2;
         int wheel = deltaLines * WHEEL_DELTA;
@@ -111,6 +114,17 @@ public static class WinApi
 
     public const int SW_RESTORE = 9;
     public const int SW_SHOW = 5;
+
+    /// <summary>v1.0.8：鼠标注入（点击/滚轮）前确保目标窗口在前台。
+    /// SendInput 是全局输入流，落点为屏幕坐标 —— 若用户此刻切到了工具窗口（比如看日志），
+    /// 点击/滚轮会落在工具界面上（客户端被遮挡也不例外），表现为"点了没反应/选项不选中/
+    /// 提交按不中"。截图（PrintWindow）被遮挡也能截对，但输入不行 —— 前台必须保证。</summary>
+    private static void EnsureForeground(IntPtr hwnd)
+    {
+        if (GetForegroundWindow() == hwnd) return;
+        Activate(hwnd);
+        Thread.Sleep(150);
+    }
 
     // ---- SendInput（比 mouse_event 更现代可靠）----
     [StructLayout(LayoutKind.Sequential)]
