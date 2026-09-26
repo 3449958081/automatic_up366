@@ -3,278 +3,574 @@
 <title>天学网答案提取</title>
 <style>
   :root{
-    /* 品牌墨蓝（与开屏商标/落地 logo 同源，勿改） */
-    --pri:#3a63f3;--pri-d:#2c4ed8;--pri-soft:#e9effe;--pri-line:#cfddfd;
-    /* 纸面与墨色 */
-    --bg:#f0f3f9;--card:#fff;--bd:#e3e8f2;--bd-strong:#ccd5e5;
-    --t:#141c2e;--sub:#68738c;
-    /* 语义色（沿用原语义：--ok=答案红 / --new=新增与正确绿 / --warn=琥珀） */
-    --ok:#d23b2e;--ok-soft:#fdecea;
-    --new:#0e8f61;--new-soft:#dcf5ea;
-    --old-soft:#eef1f6;
-    --warn:#96600a;--warn-soft:#fff3da;
-    --shadow:0 1px 2px rgba(18,28,54,.05),0 3px 10px rgba(18,28,54,.06);
-    --shadow-h:0 2px 6px rgba(18,28,54,.08),0 12px 30px rgba(18,28,54,.13);
-    --r:12px;
+    /* ===== Apple 系统色（HIG System Colors · Light） ===== */
+    --blue:#007AFF;--blue-press:#0058D9;--blue-hover:#0A84FF;--blue-soft:#EDF4FF;--blue-line:#B9D7FF;
+    /* 兼容旧变量名：所有 class / JS 生成的 HTML 仍在引用，勿删 */
+    --pri:var(--blue);--pri-d:var(--blue-press);--pri-soft:var(--blue-soft);--pri-line:var(--blue-line);
+    /* 中性色（Apple Grays） */
+    --bg:#F5F5F7;--card:#FFFFFF;--fill:#F2F2F7;--fill-2:#E9E9ED;
+    --bd:rgba(0,0,0,.09);--bd-strong:#D2D2D7;--sep:rgba(60,60,67,.13);
+    --t:#1D1D1F;--sub:#6E6E73;--ter:#86868B;
+    /* 语义色（沿用原语义：--ok=答案红 / --new=成功绿 / --warn=琥珀） */
+    --ok:#FF3B30;--ok-hover:#D70015;--ok-active:#B3220F;--ok-soft:#FFF0EF;--ok-line:#FFD9D6;
+    --new:#248A3D;--new-soft:#E9F9EE;--new-line:#B8E6C8;
+    --old-soft:#F2F2F7;--old-line:#DCDCE1;
+    --warn:#C77700;--warn-soft:#FFF6E5;--warn-line:#FFE0AE;
+    --sh:0 1px 2px rgba(0,0,0,.05),0 .3px .8px rgba(0,0,0,.04);
+    --sh-h:0 6px 20px rgba(0,0,0,.10),0 1px 3px rgba(0,0,0,.05);
+    --r:14px;    /* 卡片 */
+    --rc:10px;   /* 内嵌块 / 输入 / 日志 */
+    --rb:8px;    /* 按钮 */
+    --rl:7px;    /* 商标：Apple 方圆形 ≈ size×22% */
+    /* 深色模式要切换的派生色（原先写死 #fff / #FAFAFA 的地方一律改引用这些） */
+    --surf:#FAFAFA;        /* 表头 / 内嵌块底 */
+    --dot:#C7C7CC;         /* 状态点、虚线边框、单选圈 */
+    --tab-on:#FFFFFF;      /* 分段控件选中 pill */
+    --head-bg:rgba(250,250,252,.78);
+    --ok-text:#B3261E;     /* 危险分区正文 */
+    --sb:rgba(0,0,0,.20);  /* 滚动条滑块 */
+    --sb-h:rgba(0,0,0,.34);
+  }
+  /* ===== 深色模式（html.dark）===== */
+  html.dark{
+    --blue:#0A84FF;--blue-press:#409CFF;--blue-hover:#409CFF;--blue-soft:#0A2A4A;--blue-line:#123C63;
+    --bg:#000000;--card:#1C1C1E;--fill:#2C2C2E;--fill-2:#3A3A3C;
+    --bd:rgba(255,255,255,.10);--bd-strong:#48484A;--sep:rgba(255,255,255,.10);
+    --t:#F5F5F7;--sub:#98989F;--ter:#8E8E93;
+    --ok:#FF453A;--ok-hover:#FF6961;--ok-active:#D63A30;--ok-soft:#3A1A19;--ok-line:#5C2A27;
+    --new:#30D158;--new-soft:#123322;--new-line:#1E5433;
+    --old-soft:#2C2C2E;--old-line:#48484A;
+    --warn:#FFD60A;--warn-soft:#3A3210;--warn-line:#5A4E18;
+    --sh:0 1px 2px rgba(0,0,0,.40),0 .3px .8px rgba(0,0,0,.30);
+    --sh-h:0 6px 20px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.40);
+    --surf:#232325;--dot:#48484A;--tab-on:#636366;
+    --head-bg:rgba(28,28,30,.78);--ok-text:#FFB4AF;--sb:rgba(255,255,255,.24);--sb-h:rgba(255,255,255,.40);
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{margin:0;font-family:'Segoe UI','Microsoft YaHei UI','Microsoft YaHei',system-ui,sans-serif;background:var(--bg);color:var(--t);line-height:1.55;font-size:14px;-webkit-font-smoothing:antialiased}
-  /* 氛围层：三组径向品牌光晕，营造"纸面仪器"的纵深（fixed 不随滚动） */
-  body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:
-    radial-gradient(920px 480px at 10% -6%,rgba(58,99,243,.10),transparent 62%),
-    radial-gradient(820px 440px at 96% -2%,rgba(107,139,255,.10),transparent 58%),
-    radial-gradient(720px 520px at 55% 112%,rgba(58,99,243,.05),transparent 60%)}
-  /* ---- 顶栏（几何被开屏动画落点锁定：高58 / 左右padding22 / logo 32，勿动） ---- */
-  header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.88);backdrop-filter:blur(10px) saturate(1.5);border-bottom:1px solid var(--bd);padding:0 22px;height:58px;display:flex;align-items:center;gap:12px}
-  .logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#3a63f3,#6b8bff);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(15,23,42,.15);flex:none}
-  .logo svg{width:62%;height:62%;display:block}
-  header h1{font-size:16.5px;margin:0;font-weight:800;letter-spacing:.3px}
-  .ver{display:inline-block;vertical-align:2.5px;margin-left:7px;padding:1.5px 8px;border-radius:99px;background:var(--pri-soft);border:1px solid var(--pri-line);color:var(--pri);font-size:10.5px;font-weight:800;letter-spacing:.4px;font-family:Consolas,'Cascadia Mono',monospace}
-  header .sub{color:var(--sub);font-size:12px;margin-top:1px}
+  /* v1.6.6 导出落盘提示条：固定右上，明示文件保存位置，可打开文件夹/复制路径 */
+  .exp-tip{position:fixed;top:14px;right:14px;z-index:9999;display:none;align-items:center;gap:8px;
+    max-width:min(760px,88vw);padding:10px 12px;background:var(--card);color:var(--t);
+    border:1px solid var(--bd-strong);border-radius:var(--rc);box-shadow:var(--sh-h);font-size:13px}
+  .exp-tip b{color:var(--new);white-space:nowrap}
+  .exp-tip code{background:var(--fill);border:1px solid var(--bd);border-radius:6px;padding:2px 6px;
+    font-family:ui-monospace,Consolas,monospace;font-size:12px;cursor:copy;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px}
+  .exp-tip .warn{color:var(--warn);font-size:12px}
+  .exp-tip .ops{display:flex;gap:6px;flex-shrink:0}
+  .exp-tip .ops button{background:var(--fill);color:var(--t);border:1px solid var(--bd-strong);
+    border-radius:var(--rb);padding:4px 9px;font-size:12px;cursor:pointer}
+  .exp-tip .ops button:hover{background:var(--fill-2)}
+  body{margin:0;background:var(--bg);color:var(--t);line-height:1.5;font-size:14px;
+    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','SF Pro Display','Helvetica Neue','PingFang SC','Hiragino Sans GB','Microsoft YaHei UI','Microsoft YaHei',system-ui,sans-serif;
+    letter-spacing:-.01em;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+  /* ---- 顶栏（几何被开屏动画落点锁定：高 58 / 左右 padding 22 / logo 32，勿动） ---- */
+  header{position:sticky;top:0;z-index:20;height:58px;padding:0 22px;display:flex;align-items:center;gap:12px;
+    background:var(--head-bg);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:1px solid var(--bd)}
+  /* 商标配色 = 旧版 v1.3.x 品牌蓝（用户 2026-09-19 指定；与 app.ico / SplashForm.Cblue 同色） */
+  .logo{width:32px;height:32px;border-radius:var(--rl);background:linear-gradient(135deg,#3a63f3,#6b8bff);
+    display:flex;align-items:center;justify-content:center;flex:none;
+    box-shadow:0 2px 8px rgba(15,23,42,.15),inset 0 1px 0 rgba(255,255,255,.30)}
+  /* 勾占商标宽 62.5%（= app.ico CHECK_SCALE 1.0 = SplashForm P(r,0.27..0.76)），三处必须同值 */
+  .logo svg{width:100%;height:100%;display:block}
+  .brand{min-width:0}
+  header h1{font-size:15px;margin:0;font-weight:600;letter-spacing:-.012em;white-space:nowrap}
+  .ver{display:inline-block;vertical-align:2px;margin-left:7px;padding:1px 7px;border-radius:99px;
+    background:var(--blue-soft);border:1px solid var(--blue-line);color:var(--blue);
+    font-size:10.5px;font-weight:600;letter-spacing:0;font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace}
+  header .sub{color:var(--ter);font-size:11.5px;margin-top:1px;letter-spacing:0;white-space:nowrap}
   .head-sp{flex:1}
-  /* ---- 选项卡 ---- */
-  .tabs-wrap{position:sticky;top:58px;z-index:19;background:linear-gradient(rgba(240,243,249,.95),rgba(240,243,249,.72));backdrop-filter:blur(8px);padding:12px 22px 0}
-  .tabs{display:inline-flex;background:rgba(224,231,244,.8);border:1px solid var(--bd);border-radius:13px;padding:4px;gap:3px;box-shadow:inset 0 1px 3px rgba(18,28,54,.07)}
-  .tab{position:relative;padding:7px 22px;border:none;background:none;border-radius:9px;font-size:13.5px;color:var(--sub);cursor:pointer;font-weight:700;letter-spacing:.2px;transition:color .18s,background .18s,box-shadow .18s;font-family:inherit}
-  .tab:hover{color:var(--t)}
-  .tab.active{background:linear-gradient(180deg,#fff,#fafcff);color:var(--pri);box-shadow:0 1px 2px rgba(18,28,54,.10),0 4px 12px rgba(58,99,243,.14)}
-  .tab.active::after{content:'';position:absolute;left:22px;right:22px;bottom:3.5px;height:2px;border-radius:2px;background:linear-gradient(90deg,var(--pri),#6b8bff)}
-  /* ---- 布局 ---- */
-  main{padding:16px 22px 44px;max-width:1360px;margin:0 auto}
+  /* ---- 分段控件（Apple Segmented Control · 内嵌顶栏，不再单独占一行） ---- */
+  .seg{display:inline-flex;flex:none;background:rgba(118,118,128,.12);border-radius:9px;padding:2px}
+  .tab{position:relative;height:28px;padding:0 14px;border:none;background:none;border-radius:7px;
+    font-size:13px;font-weight:500;color:var(--t);cursor:pointer;white-space:nowrap;font-family:inherit;
+    letter-spacing:-.008em;transition:background .2s cubic-bezier(.32,.72,0,1),box-shadow .2s,font-weight .2s;
+    box-shadow:none;transform:none}
+  .tab:hover{background:var(--fill);color:var(--t);transform:none;box-shadow:none}
+  .tab.active{background:var(--tab-on);color:var(--t);font-weight:600;
+    box-shadow:0 3px 8px rgba(0,0,0,.12),0 3px 1px rgba(0,0,0,.04);transform:none}
+  /* ---- 布局：主区 + 340px 右栏 ---- */
+  main{padding:16px 22px 40px}
   .tabpane{display:none}
   .tabpane.active{display:block}
-  /* 切页交错入场：直接子元素依次上浮 */
-  .tabpane.active>*{animation:rise .34s cubic-bezier(.22,.8,.3,1) both}
+  .tabpane.active>*{animation:rise .34s cubic-bezier(.32,.72,0,1) both}
   .tabpane.active>*:nth-child(2){animation-delay:.05s}
-  .tabpane.active>*:nth-child(3){animation-delay:.1s}
-  .tabpane.active>*:nth-child(4){animation-delay:.15s}
-  .tabpane.active>*:nth-child(n+5){animation-delay:.2s}
-  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-  @keyframes fadein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
-  .card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);box-shadow:var(--shadow);padding:14px 16px;margin-bottom:14px}
+  .tabpane.active>*:nth-child(n+3){animation-delay:.1s}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  /* ---- 两种正式版式（勿再用内联 grid-template-columns 打补丁）----
+     .layout-work = 工作台型：主区 + 340px 右栏，边操作边看实时日志/结果 → 自动回答 / 抓包
+     .layout-task = 任务型：单列通栏，输入→结果，结果需横向宽度 → 搜题 / 扫描 */
+  .layout-work{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start}
+  .layout-task{display:block}
+  .col-main{min-width:0}
+  .col-side{min-width:0}
+  @media (max-width:1100px){ .layout-work{grid-template-columns:minmax(0,1fr)} }
+  @media (max-width:1080px){ header .sub{display:none} }
+  @media (max-width:900px){ header{padding:0 14px;gap:8px} .tab{padding:0 10px;font-size:12.5px} main{padding:14px 14px 32px} }
+  /* ---- 指标卡（每页 2 张，仅放有后端支撑的状态） ---- */
+  .metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:14px}
+  @media (max-width:720px){ .metrics{grid-template-columns:minmax(0,1fr)} }
+  .metric{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);box-shadow:var(--sh);
+    padding:13px 16px;display:flex;align-items:flex-start;gap:11px}
+  .metric .dot{width:8px;height:8px;border-radius:50%;background:var(--dot);flex:none;margin-top:6px;transition:background .25s,box-shadow .25s}
+  .metric.on .dot{background:var(--new);box-shadow:0 0 0 3px rgba(52,199,89,.18)}
+  .metric .k{font-size:11.5px;color:var(--ter);font-weight:500;letter-spacing:0}
+  .metric .v{font-size:20px;font-weight:600;letter-spacing:-.022em;color:var(--t);line-height:1.25;margin-top:1px}
+  .metric .s{font-size:11.5px;color:var(--ter);letter-spacing:0;margin-top:1px}
+  /* ---- 卡片 ---- */
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);box-shadow:var(--sh);padding:16px 18px;margin-bottom:14px}
+  .layout-task>.card:last-child,.col-main>.card:last-child,.col-side>.card:last-child{margin-bottom:0}
+  .ct{font-size:13.5px;font-weight:600;color:var(--t);letter-spacing:-.01em;margin:0 0 10px}
+  .ct .cd{font-weight:400;margin-left:6px}
+  .cd{font-size:12.5px;color:var(--sub);line-height:1.6}
   .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .toolbar + .toolbar{margin-top:10px}
-  label{font-size:12.5px;color:#3d4657;font-weight:700;letter-spacing:.02em}
+  .toolbar+.toolbar{margin-top:10px}
+  label{font-size:12.5px;color:var(--sub);font-weight:500;letter-spacing:-.004em}
   /* ---- 控件 ---- */
-  input[type=text],input[type=number]{height:34px;padding:0 11px;border:1px solid var(--bd-strong);border-radius:9px;font-size:13px;background:#fff;color:var(--t);transition:border-color .15s,box-shadow .15s;outline:none;font-family:inherit}
-  input[type=text]:focus,input[type=number]:focus{border-color:var(--pri);box-shadow:0 0 0 3.5px rgba(58,99,243,.14)}
-  #dir{min-width:340px;flex:1;max-width:520px;font-family:Consolas,'Cascadia Mono',monospace;font-size:12.5px}
-  select{height:34px;padding:0 9px;border:1px solid var(--bd-strong);border-radius:9px;font-size:13px;background:#fff;color:var(--t);outline:none;cursor:pointer;font-family:inherit;transition:border-color .15s,box-shadow .15s}
-  select:focus{border-color:var(--pri);box-shadow:0 0 0 3.5px rgba(58,99,243,.14)}
-  textarea{width:100%;border:1px solid var(--bd-strong);border-radius:var(--r);padding:12px;font-size:13px;font-family:Consolas,'Cascadia Mono','Courier New',monospace;background:#fff;color:var(--t);outline:none;resize:vertical;transition:border-color .15s,box-shadow .15s;line-height:1.65}
-  textarea:focus{border-color:var(--pri);box-shadow:0 0 0 3.5px rgba(58,99,243,.14)}
-  button{height:34px;padding:0 15px;border:1px solid var(--bd-strong);border-radius:9px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;color:#33405a;transition:all .16s;font-family:inherit;box-shadow:0 1px 2px rgba(18,28,54,.05)}
-  button:hover{background:#f6f9ff;border-color:#b7c4dd;transform:translateY(-1px);box-shadow:0 3px 9px rgba(18,28,54,.09)}
-  button:active{transform:translateY(0) scale(.97)}
-  button.primary{background:linear-gradient(180deg,#4a72ff,var(--pri));color:#fff;border-color:transparent;box-shadow:0 2px 7px rgba(58,99,243,.38),inset 0 1px 0 rgba(255,255,255,.2)}
-  button.primary:hover{background:linear-gradient(180deg,#4068f6,var(--pri-d));border-color:transparent;box-shadow:0 5px 16px rgba(58,99,243,.45),inset 0 1px 0 rgba(255,255,255,.2)}
-  button:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
-  .icon-btn{width:30px;height:30px;padding:0;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+  input[type=text],input[type=number],select{height:32px;padding:0 10px;border:1px solid var(--bd-strong);border-radius:var(--rb);
+    font-size:13px;background:var(--card);color:var(--t);transition:border-color .15s,box-shadow .15s;outline:none;font-family:inherit;letter-spacing:-.006em}
+  input[type=text]:focus,input[type=number]:focus,select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,122,255,.18)}
+  #dir{min-width:300px;flex:1;max-width:520px;font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;font-size:12.5px}
+  select{cursor:pointer}
+  textarea{width:100%;border:1px solid var(--bd-strong);border-radius:var(--rc);padding:11px 12px;font-size:13px;
+    font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Courier New',monospace;background:var(--card);color:var(--t);
+    outline:none;resize:vertical;transition:border-color .15s,box-shadow .15s;line-height:1.6}
+  textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,122,255,.18)}
+  button{height:32px;padding:0 14px;border:1px solid var(--bd-strong);border-radius:var(--rb);background:var(--card);cursor:pointer;
+    font-size:13px;font-weight:500;color:var(--t);letter-spacing:-.008em;font-family:inherit;
+    box-shadow:0 1px 2px rgba(0,0,0,.04);transition:background .15s,border-color .15s,box-shadow .15s,transform .1s}
+  button:hover{background:var(--surf);border-color:var(--dot)}
+  button:active{background:var(--fill);transform:scale(.98)}
+  button.primary{background:var(--blue);color:#fff;border-color:transparent;
+    box-shadow:0 1px 3px rgba(0,122,255,.32),inset 0 1px 0 rgba(255,255,255,.20)}
+  button.primary:hover{background:var(--blue-hover);border-color:transparent;box-shadow:0 3px 10px rgba(0,122,255,.35),inset 0 1px 0 rgba(255,255,255,.20)}
+  button.primary:active{background:var(--blue-press)}
+  button.danger{background:var(--ok);color:#fff;border-color:transparent;box-shadow:0 1px 3px rgba(255,59,48,.30)}
+  button.danger:hover{background:var(--ok-hover);border-color:transparent;box-shadow:0 3px 10px rgba(255,59,48,.35)}
+  button.danger:active{background:var(--ok-active)}
+  button:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+  .icon-btn{width:28px;height:28px;padding:0;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:var(--sub)}
   /* ---- 表格 ---- */
-  .tbl-wrap{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);overflow:auto;box-shadow:var(--shadow)}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{border-bottom:1px solid var(--bd);padding:9.5px 12px;text-align:left;vertical-align:top}
-  th{background:linear-gradient(180deg,#f8fafd,#f2f5fb);font-weight:800;color:#4e5a72;font-size:12px;letter-spacing:.05em;position:sticky;top:0;z-index:2;border-bottom:1px solid var(--bd-strong)}
+  .tbl-wrap{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);overflow:auto;box-shadow:var(--sh)}
+  table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+  th,td{border-bottom:1px solid var(--sep);padding:10px 14px;text-align:left;vertical-align:top}
+  th{background:var(--surf);font-weight:600;color:var(--ter);font-size:11.5px;letter-spacing:.02em;position:sticky;top:0;z-index:2}
   tbody tr{transition:background .12s}
-  tbody tr:hover{background:#f4f8ff}
+  tbody tr:hover{background:var(--surf)}
   tr:last-child td{border-bottom:none}
   /* ---- 徽标 ---- */
-  .badge{display:inline-block;padding:2.5px 10px;border-radius:99px;font-size:11px;font-weight:800;letter-spacing:.02em;white-space:nowrap;border:1px solid transparent}
-  .badge.new{background:var(--new-soft);color:var(--new);border-color:#bfe7d2}
-  .badge.old{background:var(--old-soft);color:var(--sub);border-color:#dde3ec}
-  .badge.listen{background:var(--pri-soft);color:var(--pri);border-color:var(--pri-line)}
-  .badge.warn{background:var(--warn-soft);color:var(--warn);border-color:#f2ddb2}
+  .badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:600;letter-spacing:-.004em;white-space:nowrap;border:1px solid transparent}
+  .badge.new{background:var(--new-soft);color:var(--new);border-color:var(--new-line)}
+  .badge.old{background:var(--old-soft);color:var(--sub);border-color:var(--old-line)}
+  .badge.listen{background:var(--blue-soft);color:var(--blue);border-color:var(--blue-line)}
+  .badge.warn{background:var(--warn-soft);color:var(--warn);border-color:var(--warn-line)}
   /* ---- 内容块 ---- */
   .hint{color:var(--sub);font-size:12.5px;line-height:1.65}
-  .hint b{color:#33405a}
-  .info-card{background:linear-gradient(180deg,#eef3ff,#e9effe);border:1px solid var(--pri-line);border-left:3px solid var(--pri);border-radius:var(--r);padding:10px 14px;font-size:12.5px;color:#33507e;line-height:1.7;margin-bottom:14px}
-  .info-card b{color:#1f3d7a}
-  .empty{color:var(--sub);text-align:center;padding:38px;font-size:13px}
+  .hint b{color:var(--t);font-weight:600}
+  .info-card{background:var(--blue-soft);border:1px solid var(--blue-line);border-radius:var(--rc);
+    padding:10px 14px;font-size:12.5px;color:var(--pri-d);line-height:1.65;margin-bottom:14px}
+  .empty{color:var(--ter);text-align:center;padding:44px;font-size:13px}
   .loading{color:var(--sub);padding:12px;font-size:13px}
   .loading::after{content:'';animation:dots 1.2s steps(4) infinite}
   @keyframes dots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
-  .course-block{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:14px;overflow:hidden;box-shadow:var(--shadow);transition:box-shadow .18s,transform .18s}
-  .course-block:hover{box-shadow:var(--shadow-h);transform:translateY(-1px)}
-  .course-head{padding:11px 16px;background:linear-gradient(180deg,#f8fafd,#f4f7fc);border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
-  .course-head .t{font-weight:800;font-size:13.5px;letter-spacing:.02em}
+  .course-block{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);margin-bottom:14px;overflow:hidden;box-shadow:var(--sh);transition:box-shadow .18s}
+  .course-block:hover{box-shadow:var(--sh-h)}
+  .course-head{padding:12px 16px;background:var(--surf);border-bottom:1px solid var(--sep);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+  .course-head .t{font-weight:600;font-size:13.5px;letter-spacing:-.01em}
   .course-head .m{color:var(--sub);font-size:12px}
   .opts div{padding:1.5px 0}
-  .opts .ok{color:var(--new);font-weight:700}
-  .ans{font-weight:800;color:var(--ok);white-space:nowrap}
-  .ana{color:#3d4657;max-width:460px;white-space:pre-wrap;font-size:12.5px}
+  .opts .ok{color:var(--new);font-weight:600}
+  .ans{font-weight:700;color:var(--ok);white-space:pre-wrap;word-break:break-word;letter-spacing:0}
+  .ana{color:var(--sub);max-width:460px;white-space:pre-wrap;font-size:12.5px}
+  /* v1.6.6：扫描提取结果表改用【固定列宽】。
+     自动布局会被超长内容带偏 —— 实测读后续写那门课：题干被撑到 819px、答案只剩 69px、
+     整行高达 5012px（旧版 nowrap 时则相反：答案撑成一条长线、题干挤成一词一行）。 */
+  .qtbl{table-layout:fixed}
+  .qtbl th,.qtbl td{overflow-wrap:anywhere}
+  /* 长内容题（读后续写 / 作文）：整行通栏 + 分节展示，拿到整表宽度，不受 6 列挤压 */
+  .qb .qb-h{font-weight:600;font-size:12.5px;color:var(--sub);margin-bottom:2px}
+  .qb .qb-s{margin-top:10px}
+  .qb .qb-s>b{display:block;font-size:11.5px;color:var(--ter);letter-spacing:.02em;margin-bottom:3px}
+  .qb .qb-t{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}
+  .qb .qb-ans{color:var(--ok);font-weight:600}
+  .qb .qb-opts div{padding:2px 0;line-height:1.6}
   .dl{display:flex;gap:6px}
-  .dl button{height:28px;padding:0 11px;font-size:12px;border-radius:8px}
-  code{background:#edf1f8;padding:1.5px 6px;border-radius:6px;font-size:12px;font-family:Consolas,'Cascadia Mono',monospace}
+  .dl button{height:28px;padding:0 11px;font-size:12px;border-radius:7px}
+  code{background:var(--fill);padding:1.5px 6px;border-radius:5px;font-size:12px;font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace}
+  /* ---- 答题路径选择卡（DOM / OCR 两条独立路径） ---- */
+  .path-row{display:flex;gap:10px;flex-wrap:wrap}
+  .path-card{flex:1;min-width:280px;border:1.5px solid var(--bd-strong);border-radius:var(--r);padding:12px 14px;cursor:pointer;
+    background:var(--card);transition:border-color .15s,box-shadow .15s,background .15s;user-select:none}
+  .path-card:hover{border-color:var(--dot)}
+  .path-card.sel{border-color:var(--blue);background:var(--blue-soft);box-shadow:0 0 0 3px rgba(0,122,255,.12)}
+  .pc-head{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--t)}
+  .pc-head b{font-weight:600;letter-spacing:-.01em}
+  .pc-radio{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--dot);flex:none;transition:border-color .15s,background .15s}
+  .path-card.sel .pc-radio{border-color:var(--blue);background:radial-gradient(circle,var(--blue) 0 42%,var(--card) 48%)}
+  .pc-badge{margin-left:auto;font-size:10.5px;font-weight:600;color:var(--blue);background:var(--blue-soft);border:1px solid var(--blue-line);border-radius:99px;padding:1.5px 8px;flex:none}
+  .pc-badge2{color:var(--sub);background:var(--old-soft);border-color:var(--old-line)}
+  .pc-rows{margin-top:6px;font-size:11.5px;color:var(--sub);line-height:1.7}
+  .pc-rows i{font-style:normal;font-weight:600;margin-right:6px;color:var(--t)}
   .row-actions{display:flex;gap:6px;align-items:center}
-  .src-link{display:inline-flex;align-items:center;gap:3px;margin-top:5px;padding:3.5px 11px;background:var(--pri-soft);color:var(--pri);border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;transition:all .15s;border:1px solid var(--pri-line)}
-  .src-link:hover{background:#dbe5fd;text-decoration:none;transform:translateY(-1px)}
-  .chk-wrap{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:#3d4657;font-weight:500;cursor:pointer;user-select:none}
-  input[type=checkbox]{width:15px;height:15px;accent-color:var(--pri);cursor:pointer}
-  /* ---- 抓包日志（深色仪器终端） ---- */
-  .console{background:linear-gradient(180deg,#0e1729,#0a1120);color:#9ccdf5;padding:14px 16px;border-radius:var(--r);font-size:12px;overflow:auto;max-height:56vh;white-space:pre-wrap;font-family:Consolas,'Cascadia Mono',monospace;line-height:1.7;margin-top:12px;border:1px solid #1d2b47;box-shadow:inset 0 1px 0 rgba(255,255,255,.04),var(--shadow)}
+  .src-link{display:inline-flex;align-items:center;gap:3px;margin-top:5px;padding:3px 10px;background:var(--blue-soft);
+    color:var(--blue);border-radius:7px;font-size:12px;font-weight:500;text-decoration:none;transition:background .15s;border:1px solid var(--blue-line)}
+  .src-link:hover{background:var(--blue-line);text-decoration:none}
+  .chk-wrap{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--t);font-weight:500;cursor:pointer;user-select:none}
+  input[type=checkbox]{width:15px;height:15px;accent-color:var(--blue);cursor:pointer}
+  /* ---- 日志面板（Apple 浅色内嵌块 + 等宽） ---- */
+  .console{background:var(--surf);color:var(--sub);padding:11px 13px;border-radius:var(--rc);font-size:12px;overflow:auto;
+    max-height:220px;white-space:pre-wrap;line-height:1.6;margin:0;border:1px solid var(--bd);
+    font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;letter-spacing:0}
+  /* ---- 分区：日常维护 / 危险操作（两个缓存按钮语义完全不同，必须强区分） ---- */
+  .zone{border-radius:var(--rc);padding:12px 14px;margin-top:10px}
+  .zone-neutral{background:var(--fill);border:1px solid var(--bd)}
+  .zone-danger{background:var(--ok-soft);border:1px solid var(--ok-line)}
+  .zone-h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:-.01em}
+  .zone-neutral .zone-h{color:var(--t)}
+  .zone-danger .zone-h{color:var(--ok)}
+  .zone-p{font-size:12.5px;line-height:1.6;margin-top:4px}
+  .zone-neutral .zone-p{color:var(--sub)}
+  .zone-danger .zone-p{color:var(--ok-text)}
+  .zone-act{margin-top:10px}
+  .tag-danger{display:inline-block;padding:1px 8px;border-radius:99px;font-size:10.5px;font-weight:600;background:var(--ok-soft);color:var(--ok);letter-spacing:0}
   /* ---- Toast ---- */
   #toasts{position:fixed;bottom:22px;right:22px;z-index:100;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
-  .toast{background:linear-gradient(180deg,#202c47,#141c2e);color:#fff;padding:10px 16px;border-radius:11px;font-size:13px;box-shadow:0 8px 28px rgba(10,16,32,.4);opacity:0;transform:translateY(10px) scale(.98);transition:all .28s cubic-bezier(.22,.8,.3,1);max-width:420px;line-height:1.5;border:1px solid rgba(255,255,255,.08)}
+  .toast{background:rgba(29,29,31,.92);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:#fff;padding:10px 16px;
+    border-radius:12px;font-size:13px;box-shadow:0 8px 30px rgba(0,0,0,.22);opacity:0;transform:translateY(8px) scale(.98);
+    transition:all .28s cubic-bezier(.32,.72,0,1);max-width:420px;line-height:1.45;border:.5px solid rgba(255,255,255,.12)}
   .toast.show{opacity:1;transform:none}
-  .toast.ok{background:linear-gradient(180deg,#12a574,#0e8f61)}
-  .toast.err{background:linear-gradient(180deg,#e04c3d,#d23b2e)}
-  /* ---- 密钥弹窗 ---- */
-  .modal-mask{position:fixed;inset:0;background:rgba(12,18,34,.5);z-index:90;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px);animation:fadein .15s}
-  .modal{background:#fff;border-radius:16px;width:min(560px,92vw);max-height:86vh;overflow:auto;box-shadow:0 24px 70px rgba(10,16,32,.4);border:1px solid var(--bd);animation:pop .24s cubic-bezier(.2,.9,.3,1.15)}
-  @keyframes pop{from{opacity:0;transform:scale(.96) translateY(10px)}to{opacity:1;transform:none}}
-  .modal-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px 12px;border-bottom:1px solid var(--bd)}
-  .modal-head b{font-size:15px;letter-spacing:.02em}
+  .toast.ok{background:rgba(36,138,61,.95)}
+  .toast.err{background:rgba(255,59,48,.95)}
+  /* ---- 弹窗 ---- */
+  .modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:90;display:flex;align-items:center;justify-content:center;
+    backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);animation:fadein .18s}
+  .modal{background:var(--card);border-radius:16px;width:min(560px,92vw);max-height:86vh;overflow:auto;
+    box-shadow:0 30px 80px rgba(0,0,0,.28);animation:pop .28s cubic-bezier(.32,.72,0,1)}
+  @keyframes pop{from{opacity:0;transform:scale(.96) translateY(12px)}to{opacity:1;transform:none}}
+  .modal-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px 12px;border-bottom:1px solid var(--sep)}
+  .modal-head b{font-size:15px;font-weight:600;letter-spacing:-.012em}
   .modal-body{padding:16px 20px 20px}
-  .key-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--bd);border-radius:9px;margin-bottom:6px;font-size:13px;background:#fbfcfe;transition:border-color .15s}
+  .key-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--bd);border-radius:var(--rb);
+    margin-bottom:6px;font-size:13px;background:var(--surf);transition:border-color .15s}
   .key-row:hover{border-color:var(--bd-strong)}
   .key-row code{flex:1;font-size:12.5px}
   .key-row .del{margin-left:auto}
   /* ---- OCR 拖拽区 ---- */
-  .ocr-drop{border:2px dashed #c2cde6;border-radius:var(--r);padding:20px;text-align:center;cursor:pointer;background:#fbfcff;transition:all .18s;margin-top:8px}
-  .ocr-drop:hover{border-color:var(--pri);background:var(--pri-soft);box-shadow:0 0 0 4px rgba(58,99,243,.07)}
-  .ocr-drop.drag{border-color:var(--pri);background:var(--pri-soft);transform:scale(1.01);box-shadow:0 0 0 5px rgba(58,99,243,.12)}
-  .ocr-preview{max-width:300px;max-height:240px;border-radius:9px;display:none;margin-top:8px;box-shadow:var(--shadow-h)}
+  .ocr-drop{border:1.5px dashed var(--dot);border-radius:var(--rc);padding:20px;text-align:center;cursor:pointer;
+    background:var(--surf);transition:border-color .18s,background .18s,box-shadow .18s;margin-top:8px}
+  .ocr-drop:hover{border-color:var(--blue);background:var(--blue-soft)}
+  .ocr-drop.drag{border-color:var(--blue);background:var(--blue-soft);box-shadow:0 0 0 4px rgba(0,122,255,.10)}
+  .ocr-preview{max-width:300px;max-height:240px;border-radius:var(--rc);display:none;margin-top:8px;box-shadow:var(--sh-h)}
   .form-row{display:flex;gap:8px;margin-top:12px}
   .form-row input{flex:1;min-width:0}
-  .divider{height:1px;background:var(--bd);margin:16px -20px 0}
-  ::-webkit-scrollbar{width:9px;height:9px}
-  ::-webkit-scrollbar-thumb{background:#c3cde0;border-radius:99px;border:2px solid transparent;background-clip:content-box}
-  ::-webkit-scrollbar-thumb:hover{background:#9fb0cc;border:2px solid transparent;background-clip:content-box}
+  .divider{height:1px;background:var(--sep);margin:16px -20px 0}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:var(--sb);border-radius:99px;border:2px solid transparent;background-clip:content-box}
+  ::-webkit-scrollbar-thumb:hover{background:var(--sb-h);border:2px solid transparent;background-clip:content-box}
   ::-webkit-scrollbar-track{background:transparent}
-</style></head><body>
+</style>
+<script>
+/* 主题必须在渲染前定好，否则会闪一下白底。存 localStorage（键 txw_theme），未设置则跟随系统。 */
+(function(){
+  try{
+    var t = localStorage.getItem('txw_theme');
+    if(t!=='dark' && t!=='light'){
+      t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    }
+    if(t==='dark') document.documentElement.classList.add('dark');
+    window.__txwTheme = t;
+  }catch(e){ window.__txwTheme = 'light'; }
+})();
+</script>
+</head><body>
 <div id="firstRun" class="modal-mask" style="display:none">
   <div class="modal">
     <div class="modal-head"><b>使用前须知</b></div>
     <div class="modal-body">
-      <div class="hint" style="line-height:1.9">
-        · 本工具仅供<b>个人学习与复习</b>使用，请勿传播答案或用于商业用途；题目内容版权归天学网及其内容提供方所有。<br>
-        · 功能入口在顶部选项卡：<b>自动回答 / 搜题对答案 / 扫描提取 / 抓包拉题库</b>。<br>
-        · 首次点【启动客户端】会引导下载安装天学网客户端，安装目录由你自选（与程序本体分立存放）。<br>
-        · 详细使用说明见程序目录下《使用须知.txt》。
+      <div class="hint" style="line-height:1.85">
+        仅供<b>个人学习与复习</b>使用，请勿传播答案或用于商业用途；题目版权归天学网及其内容提供方所有。<br>
+        完整说明见右上角「使用须知」。
       </div>
-      <div class="form-row"><button class="primary" style="flex:1;height:38px" onclick="firstRunDone()">我已知晓，开始使用</button></div>
+      <div class="form-row"><button class="primary" style="flex:1;height:36px" onclick="firstRunDone()">我已知晓，开始使用</button></div>
     </div>
   </div>
 </div>
 <header>
   <div class="logo"><svg viewBox="0 0 100 100" fill="none"><path d="M27 53 L44 70 L76 33" stroke="#fff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-  <div>
+  <div class="brand">
     <h1>天学网答案提取<span class="ver" id="appVer" style="display:none"></span></h1>
     <div class="sub">本地纯算解密 .u3enc · 提取听力/题目答案</div>
   </div>
   <div class="head-sp"></div>
-  <button onclick="openKeys()">密钥管理</button>
-</header>
-<div class="tabs-wrap">
-  <div class="tabs">
+  <div class="seg">
     <button class="tab active" data-tab="auto" onclick="showTab('auto')">自动回答</button>
     <button class="tab" data-tab="bank" onclick="showTab('bank')">搜题对答案</button>
     <button class="tab" data-tab="scan" onclick="showTab('scan')">扫描提取</button>
     <button class="tab" data-tab="cap" onclick="showTab('cap')">抓包拉题库</button>
+    <button class="tab" data-tab="report" onclick="showTab('report')">作文报告</button>
+  </div>
+  <button class="icon-btn" id="themeBtn" onclick="toggleTheme()" title="切换深色 / 浅色">◐</button>
+  <button onclick="openHelp()">使用须知</button>
+  <button onclick="openKeys()">密钥管理</button>
+</header>
+<main>
+<!-- ============ 自动回答 ============ -->
+<div id="tab-auto" class="tabpane active">
+  <div class="metrics">
+    <div class="metric" id="mMc"><span class="dot"></span>
+      <div><div class="k">接管状态</div><div class="v" id="mMcVal">未运行</div><div class="s" id="mMcSub">启动后可抓取答案</div></div>
+    </div>
+    <div class="metric" id="mClient"><span class="dot"></span>
+      <div><div class="k">客户端连接</div><div class="v" id="mClientVal">检测中</div><div class="s" id="mClientSub">正在检测客户端进程</div></div>
+    </div>
+  </div>
+  <div class="layout-work">
+    <div class="col-main">
+      <div class="card">
+        <div class="ct">选择答题路径<span class="cd">选定后仅显示该路径配置</span></div>
+        <div class="path-row">
+          <div class="path-card sel" id="pathDom" onclick="setPath('dom')">
+            <div class="pc-head"><span class="pc-radio"></span><b>DOM 直连自动回答</b><span class="pc-badge">推荐 · 支持单词PK</span></div>
+            <div class="pc-rows"><div>须由本工具启动客户端；无识别误差、免选窗口</div></div>
+          </div>
+          <div class="path-card" id="pathOcr" onclick="setPath('ocr')">
+            <div class="pc-head"><span class="pc-radio"></span><b>屏幕视觉 OCR 自动回答</b><span class="pc-badge pc-badge2">兼容降级 · 不支持PK</span></div>
+            <div class="pc-rows"><div>客户端正常启动即可；需选窗口并保持前台</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ct">启动与运行<span class="cd">启动方式随所选路径略有不同</span></div>
+        <div id="pathDomPanel">
+          <div class="toolbar">
+            <button class="primary" onclick="autoLaunch()">启动客户端（调试模式）</button>
+            <button onclick="pickClientDir()">选择位置…</button>
+            <span class="cd">先完全退出客户端</span>
+            <label style="margin-left:6px">轮询间隔</label>
+            <input id="autoIntervalDom" type="number" min="1" max="600" step="0.5" style="width:76px" value="1.5">
+            <span class="cd">秒</span>
+          </div>
+        </div>
+        <div id="pathOcrPanel" style="display:none">
+          <div class="toolbar">
+            <label>目标窗口</label>
+            <select id="autoWin" style="min-width:240px"></select>
+            <button onclick="autoRefresh()">刷新窗口</button>
+            <button onclick="autoLaunch()">启动客户端</button>
+            <button onclick="pickClientDir()">选择位置…</button>
+          </div>
+          <div class="toolbar">
+            <label>轮询间隔</label>
+            <input id="autoIntervalOcr" type="number" min="5" max="600" step="1" style="width:76px" value="20">
+            <span class="cd">秒</span>
+            <label style="margin-left:6px">最低置信度</label>
+            <select id="minConf" style="width:230px">
+              <option value="high">高（仅题干+选项双命中才点）</option>
+              <option value="mid" selected>中（高置信 + 中置信，推荐）</option>
+              <option value="low">低（全部都点，含未命中与兜底匹配）</option>
+            </select>
+            <span class="cd">只有置信度 ≥ 所选档位的匹配才会被自动点击</span>
+          </div>
+        </div>
+        <div class="toolbar" style="margin-top:14px;border-top:1px solid var(--sep);padding-top:14px">
+          <button class="primary" id="autoStartBtn" onclick="autoStart()">开始自动回答</button>
+          <button id="autoStopBtn" onclick="autoStop()" disabled>停止</button>
+          <span id="autoStat" class="cd"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ct">无痕下载接管<span class="cd">抓题库答案 · 点「开始自动回答」会自动启动</span></div>
+        <div class="toolbar">
+          <button class="primary" onclick="mcStart()">启动接管</button>
+          <button onclick="mcStop()">停止</button>
+          <button onclick="mcRefresh()">刷新</button>
+          <span id="mcStatus" class="cd"></span>
+        </div>
+        <div class="zone zone-neutral">
+          <div class="zone-h">客户端课程缓存 · 日常维护</div>
+          <div class="zone-p">清客户端的课程缓存，重开课程会自动重下</div>
+          <div class="zone-act"><button onclick="mcCache()">清理课程缓存</button></div>
+        </div>
+        <div class="zone zone-neutral">
+          <div class="zone-h">下载的安装包 · 清理</div>
+          <div class="zone-p">安装完成后的客户端安装包（约 250 MB）可手动删除，释放空间</div>
+          <div class="zone-act"><button onclick="clearInstaller()">清理安装包</button></div>
+        </div>
+        <div class="zone zone-danger">
+          <div class="zone-h">答案题库（本工具）· 数据管理<span class="tag-danger">不可恢复</span></div>
+          <div class="zone-p">清本工具的答案库，清空后不可恢复</div>
+          <div class="zone-act"><button class="danger" onclick="mcClear()">清空答案缓存</button></div>
+        </div>
+      </div>
+    </div>
+    <aside class="col-side">
+      <div class="card">
+        <div class="ct">运行日志</div>
+        <pre id="autoLog" class="console">(未开始)</pre>
+      </div>
+      <div class="card">
+        <div class="ct">最近识别到的屏幕文字<span class="cd">供核对</span></div>
+        <div id="autoPreview" class="cd" style="white-space:pre-wrap"></div>
+      </div>
+      <div class="card">
+        <div class="ct">接管日志</div>
+        <pre id="mcLog" class="console">(日志为空，先启动)</pre>
+      </div>
+      <div class="card">
+        <div class="ct">抓到的答案<span class="cd">缓存题库</span></div>
+        <pre id="mcAnswers" class="console">(暂无答案；下载课程后自动生成)</pre>
+      </div>
+    </aside>
   </div>
 </div>
-<main>
+<!-- ============ 搜题对答案 ============ -->
 <div id="tab-bank" class="tabpane">
-  <div class="card ocr-card">
-    <div class="toolbar">
-      <span style="font-size:13px;font-weight:700;color:#3d4657">导入长图自动识别</span>
-      <button onclick="ocrSelect()">选择图片</button>
-      <button class="primary" id="ocrRunBtn" onclick="ocrRun()" disabled>识别并填入</button>
-      <span id="ocrStatus" class="hint"></span>
+  <div class="layout-task">
+    <div class="card">
+      <div class="ct">导入长图自动识别</div>
+      <div class="toolbar">
+        <button onclick="ocrSelect()">选择图片</button>
+        <button class="primary" id="ocrRunBtn" onclick="ocrRun()" disabled>识别并填入</button>
+        <span id="ocrStatus" class="cd"></span>
+      </div>
+      <div id="ocrDrop" class="ocr-drop" onclick="if(!ocrBase64)ocrSelect()" ondragover="ocrDragOver(event)" ondragleave="ocrDragLeave(event)" ondrop="ocrDrop(event)">
+        <input type="file" id="ocrFile" accept="image/*" onchange="ocrOnChange(event)" style="display:none">
+        <div id="ocrHint" class="hint">点击此处或拖入试卷长图</div>
+        <img id="ocrPreview" class="ocr-preview" alt="">
+      </div>
     </div>
-    <div id="ocrDrop" class="ocr-drop" onclick="if(!ocrBase64)ocrSelect()" ondragover="ocrDragOver(event)" ondragleave="ocrDragLeave(event)" ondrop="ocrDrop(event)">
-      <input type="file" id="ocrFile" accept="image/*" onchange="ocrOnChange(event)" style="display:none">
-      <div id="ocrHint" class="hint">点击此处或把试卷长图拖到这里（支持 PNG/JPG；使用系统自带 Windows OCR 引擎,首次调用约 2-5 秒）</div>
-      <img id="ocrPreview" class="ocr-preview" alt="">
-    </div>
-  </div>
-  <div class="card">
-    <div class="toolbar">
-      <label>题库题数 <b id="bankCount" style="color:var(--pri)">-</b></label>
-      <button class="primary" onclick="bankMatch()">匹配对答案</button>
-      <button onclick="bankRebuild()">重建索引</button>
-      <span id="bankStatus" class="hint"></span>
-    </div>
-  </div>
-  <div class="card" style="padding:12px">
-    <textarea id="bankPaper" style="height:200px" placeholder="把试卷文本粘贴进来，例如：
+    <div class="card">
+      <div class="ct">试卷文本<span class="cd" id="bankCountBadge">题库 -</span></div>
+      <textarea id="bankPaper" style="height:200px" placeholder="把试卷文本粘贴进来，例如：
 1. What are the two speakers talking about?
 A. Real laws.
 B. The latest physics.
 C. The school security."></textarea>
+      <div class="toolbar" style="margin-top:12px">
+        <button class="primary" onclick="bankMatch()">匹配对答案</button>
+        <button onclick="bankRebuild()">重建索引</button>
+        <span id="bankStatus" class="cd"></span>
+      </div>
+    </div>
+    <div id="bankResult"></div>
   </div>
-  <div id="bankResult"></div>
 </div>
+<!-- ============ 扫描提取 ============ -->
 <div id="tab-scan" class="tabpane">
-  <div class="card">
-    <div class="toolbar">
-      <label>资源目录</label>
-      <input id="dir" type="text" placeholder="D:\Up366StudentFiles\resources">
-      <button class="primary" onclick="doScan()">扫描</button>
-      <button onclick="setBaseline()">设为基线</button>
-      <button onclick="extractSelected()">提取选中</button>
+  <div class="metrics">
+    <div class="metric"><span class="dot on"></span>
+      <div><div class="k">课程总数</div><div class="v" id="mCourseVal">-</div><div class="s" id="mCourseSub">扫描资源目录得到</div></div>
     </div>
-    <div class="toolbar">
-      <label class="chk-wrap"><input type="checkbox" id="pollChk" onchange="togglePoll(this)"> 自动轮询</label>
-      <select id="pollInt" onchange="if(window.pollEnabled)togglePoll(document.getElementById('pollChk'))">
-        <option value="5000">每 5 秒</option><option value="10000" selected>每 10 秒</option><option value="20000">每 20 秒</option><option value="30000">每 30 秒</option>
-      </select>
-      <span id="pollStat" class="hint"></span>
-      <span style="flex:1"></span>
-      <span id="status" class="hint"></span>
+    <div class="metric"><span class="dot"></span>
+      <div><div class="k">可解密</div><div class="v" id="mDecVal">-</div><div class="s">含答案、可直接提取</div></div>
     </div>
   </div>
-  <div id="courseList"></div>
-  <div id="results" style="margin-top:14px"></div>
-</div>
-<div id="tab-auto" class="tabpane active">
-  <div class="card">
-    <div class="toolbar">
-      <label>目标窗口</label>
-      <select id="autoWin" style="min-width:260px"></select>
-      <button onclick="autoRefresh()">刷新窗口</button>
-      <button onclick="autoLaunch()">启动客户端</button>
-      <button onclick="pickClientDir()">选择位置…</button>
-      <button class="primary" id="autoStartBtn" onclick="autoStart()">开始自动回答</button>
-      <button id="autoStopBtn" onclick="autoStop()" disabled>停止</button>
+  <div class="layout-task">
+    <div class="card">
+      <div class="ct">资源目录</div>
+      <div class="toolbar">
+        <input id="dir" type="text" placeholder="D:\Up366StudentFiles\resources">
+        <button class="primary" onclick="doScan()">扫描</button>
+        <button onclick="setBaseline()">设为基线</button>
+        <button onclick="extractSelected()">提取选中</button>
+      </div>
+      <div class="toolbar">
+        <label class="chk-wrap"><input type="checkbox" id="pollChk" onchange="togglePoll(this)"> 自动轮询</label>
+        <select id="pollInt" onchange="if(window.pollEnabled)togglePoll(document.getElementById('pollChk'))">
+          <option value="5000">每 5 秒</option><option value="10000" selected>每 10 秒</option><option value="20000">每 20 秒</option><option value="30000">每 30 秒</option>
+        </select>
+        <span id="pollStat" class="cd"></span>
+        <span style="flex:1"></span>
+        <span id="status" class="cd"></span>
+      </div>
     </div>
-    <div class="toolbar">
-      <label>轮询间隔</label>
-      <input id="autoInterval" type="number" min="5" max="600" step="1" style="width:76px" value="20"
-             title="单位：秒。每次检查屏幕变化的时间，可自由填写；最低 5 秒（OCR 识别一轮通常需数秒，填更短会与上一轮识别重叠）"/>
-      <span class="hint">秒</span>
-      <label style="margin-left:14px">最低置信度</label>
-      <select id="minConf" style="width:250px">
-        <option value="high">高（仅题干+选项双命中才点）</option>
-        <option value="mid" selected>中（高置信 + 中置信，推荐）</option>
-        <option value="low">低（全部都点，含未命中与兜底匹配）</option>
-      </select>
-      <span class="hint">只有置信度 ≥ 所选档位的匹配才会被自动点击；选“低”则所有匹配结果都会处理</span>
-      <span id="autoStat" class="hint"></span>
+    <div class="card">
+      <div class="ct">导出位置<span class="cd">下载的 JSON / HTML / 作文报告都固定保存到这里</span></div>
+      <div class="toolbar">
+        <input id="expDirInput" type="text" placeholder="（默认）下载 文件夹下的 TxwExtract" onchange="setExpDir(this.value)" onkeydown="if(event.key==='Enter')setExpDir(this.value)">
+        <button onclick="pickExpDir(true)">浏览…</button>
+        <button onclick="setExpDir('')">恢复默认</button>
+        <button onclick="openExpDirNow()">打开文件夹</button>
+      </div>
+      <div class="toolbar">
+        <span id="expDirStat" class="cd">正在读取…</span>
+        <span style="flex:1"></span>
+        <span id="expDirBadge"></span>
+      </div>
     </div>
-  </div>
-  <div class="card" style="padding:12px">
-    <div style="font-size:13px;font-weight:700;color:#3d4657;margin-bottom:6px">运行日志</div>
-    <pre id="autoLog" class="console" style="max-height:300px">(未开始)</pre>
-  </div>
-  <div class="card" style="padding:12px">
-    <div style="font-size:13px;font-weight:700;color:#3d4657;margin-bottom:6px">最近识别到的屏幕文字（供核对）</div>
-    <div id="autoPreview" class="hint" style="white-space:pre-wrap"></div>
+    <div id="courseList"></div>
+    <div id="results" style="margin-top:14px"></div>
   </div>
 </div>
+<!-- ============ 抓包拉题库 ============ -->
 <div id="tab-cap" class="tabpane">
-  <div class="card">
-    <div class="toolbar">
-      <button class="primary" onclick="capStart()">启动抓包代理</button>
-      <button onclick="capLaunch()">打开客户端(带代理)</button>
-      <button onclick="capTest()">测试代理</button>
-      <button onclick="capList()">刷新日志</button>
-      <button onclick="capStop()">停止代理</button>
-      <span id="capStatus" class="hint"></span>
+  <div class="metrics">
+    <div class="metric" id="mCap"><span class="dot"></span>
+      <div><div class="k">接管状态</div><div class="v" id="mCapVal">未运行</div><div class="s" id="mCapSub">启动后可抓取答案</div></div>
+    </div>
+    <div class="metric" id="mCapAns"><span class="dot on"></span>
+      <div><div class="k">缓存答案</div><div class="v" id="mCapAnsVal">0</div><div class="s">条 · 已并入题库</div></div>
     </div>
   </div>
-  <pre id="capLog" class="console">(日志为空，先启动代理)</pre>
+  <div class="layout-work">
+    <div class="col-main">
+      <div class="card">
+        <div class="ct">抓题库答案<span class="cd">与自动回答页的接管同一功能</span></div>
+        <div class="toolbar">
+          <button class="primary" onclick="capMcStart()">启动接管</button>
+          <button onclick="capMcStop()">停止</button>
+          <button onclick="capMcRefresh()">刷新</button>
+          <span id="capStatus" class="cd"></span>
+        </div>
+        <div class="zone zone-neutral">
+          <div class="zone-h">客户端课程缓存 · 日常维护</div>
+          <div class="zone-p">清客户端的课程缓存，重开课程会自动重下</div>
+          <div class="zone-act"><button onclick="capMcCache()">清理课程缓存</button></div>
+        </div>
+        <div class="zone zone-danger">
+          <div class="zone-h">答案题库（本工具）· 数据管理<span class="tag-danger">不可恢复</span></div>
+          <div class="zone-p">清本工具的答案库，清空后不可恢复</div>
+          <div class="zone-act"><button class="danger" onclick="capMcClear()">清空答案缓存</button></div>
+        </div>
+      </div>
+    </div>
+    <aside class="col-side">
+      <div class="card">
+        <div class="ct">接管日志</div>
+        <pre id="capLog" class="console">(日志为空，先启动)</pre>
+      </div>
+      <div class="card">
+        <div class="ct">抓到的答案<span class="cd">缓存题库</span></div>
+        <pre id="capAnswers" class="console">(暂无答案；下载课程后自动生成)</pre>
+      </div>
+    </aside>
+  </div>
+</div>
+<!-- ============ 作文报告 ============ -->
+<div id="tab-report" class="tabpane">
+  <div class="layout-work">
+    <div class="col-main">
+      <div class="card">
+        <div class="ct">提取作文报告<span class="cd">从客户端里「已打开」的报告页取正文</span></div>
+        <div class="hint" style="line-height:1.85">
+          报告页被<b>马赛克挡住</b>或提示"未解锁"时，正文其实已经在页面里了 —— 本功能只做<b>运行时去遮罩</b>，
+          把报告存成可读的 .txt / .html，<b>不改动客户端任何文件</b>。<br>
+          用法：① 到「自动回答」页点 <b>启动客户端（调试模式）</b>；② 在客户端里打开作文报告；
+          ③ 回到这里点下面按钮。<br>
+          取到的是<b>当前显示的那一次提交</b>；「写作指导 / 范文示例」若是空的，说明该次批改本身没有这部分内容。
+        </div>
+        <div class="toolbar" style="margin-top:12px">
+          <button class="primary" id="reportBtn" onclick="reportExtract()">提取作文报告</button>
+          <span id="reportStatus" class="cd">待提取</span>
+        </div>
+      </div>
+      <div id="reportResult"></div>
+    </div>
+  </div>
 </div>
 </main>
 <div id="toasts"></div>
@@ -282,19 +578,72 @@ C. The school security."></textarea>
   <div class="modal">
     <div class="modal-head"><b>密钥管理</b><button class="icon-btn" onclick="closeKeys()">✕</button></div>
     <div class="modal-body">
-      <div class="hint">解密完全在本地进行（AES-128-CBC，IV 为文件前 16 字节）。若天学网更换密钥导致解密失败，可<b>从客户端自动查找</b>新密钥：程序会扫描客户端 up366.exe 中的候选串，用本地样本文件逐一试解，能解开的即新密钥并自动保存。也可以手动粘贴别处获得的密钥。</div>
-      <div style="margin:12px 0 6px;font-size:13px;font-weight:700;color:#3d4657">当前密钥（<span id="keyCount">-</span> 个）</div>
+      <div class="hint">解密全程在本地进行。密钥失效时按下面顺序依次尝试（多数情况第一步即可）。</div>
+      <div style="margin:12px 0 6px;font-size:13px;font-weight:600;color:var(--t)">当前密钥（<span id="keyCount">-</span> 个）<span id="keyFmt" class="badge new" style="display:none;margin-left:6px"></span></div>
       <div id="keyList"></div>
       <div class="divider"></div>
       <div class="form-row">
-        <input id="newKey" type="text" placeholder="手动粘贴新密钥（24 位 base64，形如 XXXXXX…==）">
+        <input id="newKey" type="text" placeholder="手动粘贴凭据（形如 XXXXXX…==）">
         <button onclick="addKey()">添加</button>
       </div>
       <div class="form-row">
-        <input id="exePath" type="text" placeholder="客户端 up366.exe 路径（留空则自动查找常用位置）">
-        <button class="primary" onclick="discoverKeys()">从客户端自动查找</button>
+        <input id="exePath" type="text" placeholder="客户端主程序路径（留空则自动查找常用位置）">
+      </div>
+      <div class="form-row">
+        <button class="primary" style="flex:1" onclick="discoverKeys()">① 从客户端文件查找</button>
+        <button style="flex:1" onclick="huntKeys()">② 从客户端运行态查找</button>
+      </div>
+      <div class="form-row">
+        <button style="flex:1" onclick="dumpClient()">③ 导出客户端资源</button>
       </div>
       <div id="keyMsg" class="hint" style="margin-top:10px"></div>
+    </div>
+  </div>
+</div>
+<div id="helpModal" class="modal-mask" style="display:none" onclick="if(event.target===this)closeHelp()">
+  <div class="modal" style="width:min(680px,92vw)">
+    <div class="modal-head"><b>使用须知</b><button class="icon-btn" onclick="closeHelp()">✕</button></div>
+    <div class="modal-body">
+      <div style="font-weight:600;color:var(--t);margin:0 0 6px;font-size:13.5px">功能说明</div>
+      <ul style="margin:4px 0;padding-left:18px;color:var(--sub);font-size:13px;line-height:1.7">
+        <li><b style="color:var(--t)">自动回答（主打）</b>：两种引擎 —— <b style="color:var(--t)">DOM 直连（推荐）</b>直连客户端页面判题作答，直接读页面内嵌的参考答案、选项顺序被打乱也能命中；题目没内嵌答案时改为查本工具抓到的答案库。<b style="color:var(--t)">屏幕视觉 OCR（兼容）</b>截图识别 + 模拟点击。</li>
+        <li><b style="color:var(--t)">搜题对答案</b>：粘贴试卷文本或导入长图 OCR，本地题库匹配，结果分高 / 中 / 未命中。</li>
+        <li><b style="color:var(--t)">扫描提取</b>：扫客户端数据目录，勾选课程导出 JSON + 可打印 HTML 报告。</li>
+        <li><b style="color:var(--t)">导出位置</b>：下载的 JSON / HTML / 作文报告固定保存到该目录。可在扫描提取页的「导出位置」卡片里直接输入路径、点「浏览…」选择，或点「恢复默认」用回系统下载文件夹下的 <code>TxwExtract</code>。下载完成后右上角会提示实际保存路径，可一键打开所在文件夹。</li>
+        <li><b style="color:var(--t)">抓包拉题库 / 无痕下载接管</b>：同一套接管实现，任选其一；抓到的答案自动并入题库。</li>
+        <li><b style="color:var(--t)">作文报告</b>：客户端里报告页被马赛克挡住（权益为试用型时会出现）也能提取正文 —— 只做运行时去遮罩，导出 .txt / .html，不改动客户端文件。需用调试模式启动客户端并先打开报告页。</li>
+      </ul>
+      <div style="font-weight:600;color:var(--t);margin:14px 0 6px;font-size:13.5px">要做的</div>
+      <ul style="margin:4px 0;padding-left:18px;color:var(--sub);font-size:13px;line-height:1.7">
+        <li>启动时 UAC 弹框点<b style="color:var(--t)">「是」</b>，否则自动点击会被系统拦截。</li>
+        <li>用 <b style="color:var(--t)">DOM 直连</b>前，先完全退出客户端（含托盘），再从页内点「启动客户端」。</li>
+        <li>首次使用按提示<b style="color:var(--t)">自选客户端安装目录</b>（之后自动记住）。</li>
+        <li>抓题库：点「启动接管」后<b style="color:var(--t)">重启客户端</b>，再打开 / 下载课程。</li>
+        <li>出问题时：界面空白 → 装 Microsoft Edge WebView2 运行时后重开；解密失败 → 「密钥管理」按 ① → ② → ③ 依次尝试；客户端报"下载出错" → 点「停止接管」即还原；被杀软拦截 → 添加信任即可。</li>
+      </ul>
+      <div style="font-weight:600;color:var(--t);margin:14px 0 6px;font-size:13.5px">不用做的</div>
+      <ul style="margin:4px 0;padding-left:18px;color:var(--sub);font-size:13px;line-height:1.7">
+        <li>不用改系统代理、不用手动改任何系统设置 —— 程序自动接管，停止 / 关窗自动还原。</li>
+        <li>DOM 直连不用选窗口。</li>
+        <li>不用手动装客户端 —— 检测不到会引导自动下载安装。</li>
+        <li>不用手动清缓存 —— 抓到的答案自动缓存并长期可用。</li>
+        <li>不用担心弄坏客户端 —— 只读取和解密，不改客户端任何文件。</li>
+      </ul>
+      <div class="hint" style="margin-top:14px">仅供个人学习与复习使用，请勿传播答案或用于商业用途。</div>
+    </div>
+  </div>
+</div>
+<!-- 清理安装包 · 确认弹窗 -->
+<div id="clearInstallerModal" class="modal-mask" style="display:none" onclick="if(event.target===this)closeClearInstaller()">
+  <div class="modal" style="width:min(560px,92vw)">
+    <div class="modal-head"><b>清理安装包</b><button class="icon-btn" onclick="closeClearInstaller()">✕</button></div>
+    <div class="modal-body">
+      <div class="hint" style="line-height:1.7">将删除以下已下载的客户端安装包（释放 <b id="ciTotal">0 MB</b>）：</div>
+      <div id="ciList" style="margin:10px 0;max-height:240px;overflow:auto"></div>
+      <div class="form-row">
+        <button onclick="closeClearInstaller()">取消</button>
+        <button class="primary" style="flex:1;height:36px" onclick="doClearInstaller()">确认删除</button>
+      </div>
     </div>
   </div>
 </div>
@@ -312,12 +661,23 @@ window.chrome.webview.addEventListener('message', e => {
   delete __pending[m.id];
   try { p(JSON.parse(m.data)); } catch(_){ p({ok:false, msg:'后端响应解析失败'}); }
 });
-function __call(path, args){
-  return new Promise(resolve => {
+function __call(path, args, timeoutMs){
+  // v1.6.6：原来这个 Promise 只有 resolve 路径 —— postMessage 发出后若后端没回
+  // （Dispatch 抛异常、路由未登记、消息被丢弃），__pending[id] 永远不被调用，
+  // 调用方 await 到这里就永久挂起，连 catch 都不触发（表现为界面卡在"正在读取…"）。
+  // 现加超时兜底：到点仍未回 → reject 一个带 msg 的结果，让上层兜底分支真正跑到。
+  const ms = (typeof timeoutMs === 'number' && timeoutMs > 0) ? timeoutMs : 8000;
+  return new Promise((resolve, reject) => {
     const id = ++__seq;
-    __pending[id] = resolve;
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return; done = true;
+      delete __pending[id];
+      reject(new Error('后端无响应（' + path + '，' + ms + 'ms 超时）'));
+    }, ms);
+    __pending[id] = (v) => { if (done) return; done = true; clearTimeout(timer); resolve(v); };
     try { window.chrome.webview.postMessage(JSON.stringify({id, path, args: args||{}})); }
-    catch(e){ delete __pending[id]; resolve({ok:false, msg:'postMessage 失败: '+e.message}); }
+    catch(e){ if(!done){ done = true; clearTimeout(timer); delete __pending[id]; resolve({ok:false, msg:'postMessage 失败: '+e.message}); } }
   });
 }
 const fetch = async (url, opts)=>{
@@ -338,22 +698,37 @@ const fetch = async (url, opts)=>{
       case '/api/ocr': j = await __call('/api/ocr', {base64: body.base64||''}); break;
       case '/api/auto/windows': j = await __call('/api/auto/windows', {}); break;
       case '/api/auto/launch': j = await __call('/api/auto/launch', {}); break;
-      case '/api/auto/start': j = await __call('/api/auto/start', {title: body.title||'', proc: body.proc||'', intervalMs: body.intervalMs||20000, minConf: body.minConf||'mid', dir: body.dir||''}); break;
+      case '/api/auto/launchdom': j = await __call('/api/auto/launchdom', {}); break;
+      case '/api/auto/start': j = await __call('/api/auto/start', {title: body.title||'', proc: body.proc||'', intervalMs: body.intervalMs||20000, minConf: body.minConf||'mid', dir: body.dir||'', engine: body.engine||'ocr'}); break;
       case '/api/auto/stop': j = await __call('/api/auto/stop', {}); break;
       case '/api/auto/status': j = await __call('/api/auto/status', {}); break;
       case '/api/auto/conf':
-        if(opts.method==='POST') j = await __call('/api/auto/conf', {minConf: body.minConf||'mid', intervalMs: parseInt(body.intervalMs,10)||20000});
+        if(opts.method==='POST') j = await __call('/api/auto/conf', {minConf: body.minConf||'mid', intervalMs: parseInt(body.intervalMs,10)||20000, intervalMsDom: parseInt(body.intervalMsDom,10)||1500});
         else j = await __call('/api/auto/conf', {});
         break;
-      case '/api/capture/start': j = await __call('/api/capture/start', {}); break;
-      case '/api/capture/stop': j = await __call('/api/capture/stop', {}); break;
-      case '/api/capture/launch': j = await __call('/api/capture/launch', {}); break;
-      case '/api/capture/log': j = await __call('/api/capture/log', {}); break;
-      case '/api/capture/test': j = await __call('/api/capture/test', {}); break;
+      case '/api/mc/start': j = await __call('/api/mc/start', {}); break;
+      case '/api/mc/stop': j = await __call('/api/mc/stop', {}); break;
+      case '/api/mc/status': j = await __call('/api/mc/status', {}); break;
+      case '/api/mc/list': j = await __call('/api/mc/list', {}); break;
+      case '/api/mc/answers': j = await __call('/api/mc/answers', {}); break;
+      case '/api/mc/cache': j = await __call('/api/mc/cache', {}); break;
+      case '/api/mc/clear': j = await __call('/api/mc/clear', {}); break;
       case '/api/keys': j = await __call('/api/keys', {}); break;
       case '/api/keys/add': j = await __call('/api/keys/add', {key: body.key||''}); break;
       case '/api/keys/del': j = await __call('/api/keys/del', {key: body.key||''}); break;
       case '/api/keys/discover': j = await __call('/api/keys/discover', {dir: body.dir||'', exe: body.exe||''}); break;
+      case '/api/keys/hunt': j = await __call('/api/keys/hunt', {dir: body.dir||''}); break;
+      case '/api/keys/dumpclient': j = await __call('/api/keys/dumpclient', {}); break;
+      case '/api/client/installerinfo': j = await __call('/api/client/installerinfo', {}); break;
+      case '/api/client/installerclear': j = await __call('/api/client/installerclear', {}); break;
+      case '/api/download/conf': j = await __call('/api/download/conf', {}); break;
+      case '/api/download/last': j = await __call('/api/download/last', {}); break;
+      case '/api/download/open': j = await __call('/api/download/open', {path: body.path||''}); break;
+      case '/api/download/pick': j = await __call('/api/download/pick', {}); break;
+      case '/api/download/set': j = await __call('/api/download/set', {dir: body.dir||''}); break;
+      case '/api/download/opendir': j = await __call('/api/download/opendir', {}); break;
+      case '/api/report/extract': j = await __call('/api/report/extract', {}); break;
+      case '/api/report/open': j = await __call('/api/report/open', {path: body.path||''}); break;
       case '/api/firstrun': j = await __call('/api/firstrun', opts.method==='POST' ? {done:true} : {}); break;
       default: j = {ok:false, msg:'未知接口 '+path}; window.__frDefault = path;
     }
@@ -363,9 +738,11 @@ const fetch = async (url, opts)=>{
   return { json: async ()=>j, text: async ()=>JSON.stringify(j) };
 };
 // 查看题库源文件：弹层内 iframe 展示（原版是另开标签页，WebView2 内改为模态框）
+// v1.6.6：入口无参，值从 data-f 取（原 encodeURIComponent 不编码单引号，含 ' 的文件名会截断 onclick）
+function srcOpen(btn){ const f=(btn&&btn.getAttribute&&btn.getAttribute('data-f'))||''; return openSource(f); }
 async function openSource(f){
   let j;
-  try { j = await __call('/api/bank/source', {f: decodeURIComponent(f)}); }
+  try { j = await __call('/api/bank/source', {f: f}); }
   catch(e){ toast('读取源文件失败: '+e.message, 'err'); return; }
   if(!j || !j.html){ toast('读取源文件失败', 'err'); return; }
   const mask = document.createElement('div');
@@ -390,6 +767,9 @@ async function init(){
   const h=(location.hash||'').replace('#','');
   showTab(['scan','bank','auto','cap'].includes(h)?h:'auto', true);
   initAutoConf();
+  setPath(__autoPath);   // 恢复上次选择的答题路径（只显示该路径组件）
+  probeClient(); setInterval(probeClient, 5000);   // 客户端连接状态（每 5 秒探测一次窗口列表）
+  expDirInit();   // 导出位置常驻卡片：显示当前目录（默认/自定义）
   doScan();
   // 原生开屏遮罩由 C# 端 CapturePreview 确认页面真实绘制后自行撤下，页面无需上报
   setTimeout(checkFirstRun, 300);
@@ -406,10 +786,23 @@ function firstRunDone(){
   try{ fetch('/api/firstrun',{method:'POST'}); }catch(_){ }
   const m=document.getElementById('firstRun'); if(m) m.style.display='none';
 }
-// 轮询间隔：界面以秒为单位，config/后端为毫秒；下限 5 秒（OCR 识别一轮通常耗时，填更短无意义）
-const AUTO_MIN_SEC = 5;
-function ivSec(){ const v=parseInt(document.getElementById('autoInterval').value,10); return isNaN(v)?20:Math.max(AUTO_MIN_SEC,v); }
+// 轮询间隔：界面以秒为单位，config/后端为毫秒。两条路径**各自独立**：
+//   DOM  默认 1.5 秒（一轮毫秒级完成）→ DOM_MIN 1 秒
+//   OCR  默认 20 秒（一轮要截图+识别）→ OCR_MIN 5 秒
+// 旧版两条路径共用后端一个 intervalMs（20 秒），导致 DOM 也要干等 20 秒、点击延迟在 0~20 秒随机浮动。
+const IV_MIN={dom:1,ocr:5}, IV_DEF={dom:2,ocr:20};
+function autoMinSec(){ return engineMode()==='dom' ? IV_MIN.dom : IV_MIN.ocr; }
+function ivInput(){ return document.getElementById(engineMode()==='dom'?'autoIntervalDom':'autoIntervalOcr'); }
+function ivElFor(eng){ return document.getElementById(eng==='dom'?'autoIntervalDom':'autoIntervalOcr'); }
+function ivSecOf(eng){ const el=ivElFor(eng); const v=parseFloat(el&&el.value); return isNaN(v)?IV_DEF[eng]:Math.max(IV_MIN[eng],v); }
+function ivMsOf(eng){ return Math.round(ivSecOf(eng)*1000); }
+function ivSec(){ return ivSecOf(engineMode()==='dom'?'dom':'ocr'); }
 function ivMs(){ return ivSec()*1000; }
+// 保存偏好时必须两条路径都带上（否则会互相覆盖）
+function ivPayload(){
+  const sel=document.getElementById('minConf');
+  return { minConf: (sel&&sel.value)||'mid', intervalMs: ivMsOf('ocr'), intervalMsDom: ivMsOf('dom') };
+}
 
 // 最低置信度：载入已保存偏好 + 改动即保存
 async function initAutoConf(){
@@ -419,18 +812,30 @@ async function initAutoConf(){
     const r=await fetch('/api/auto/conf'); const j=await r.json();
     if(j.ok){
       if(j.minConf) sel.value=j.minConf;
-      if(j.intervalMs && document.getElementById('autoInterval')) document.getElementById('autoInterval').value=String(Math.round(j.intervalMs/1000));
+      // 两条路径各自恢复：DOM 用 intervalMsDom、OCR 用 intervalMs（旧版只按当前路径填，造成互相污染）
+      const domEl=ivElFor('dom'), ocrEl=ivElFor('ocr');
+      window.__ivBackend={ dom: Math.max(IV_MIN.dom, Math.round((j.intervalMsDom||1500)/1000*10)/10),
+                           ocr: Math.max(IV_MIN.ocr, Math.round((j.intervalMs||20000)/1000)) };
+      if(domEl) domEl.value=String(window.__ivBackend.dom);
+      if(ocrEl) ocrEl.value=String(window.__ivBackend.ocr);
     }
   }catch(_){ }
   try{ const v=localStorage.getItem('txw_minConf'); if(v) sel.value=v; }catch(_){ }
   sel.addEventListener('change', async ()=>{
     try{ localStorage.setItem('txw_minConf', sel.value); }catch(_){ }
-    try{ const r=await fetch('/api/auto/conf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({minConf:sel.value, intervalMs:ivMs()})}); const j=await r.json(); if(j.ok) toast(j.msg,'ok'); }catch(_){ }
+    try{ const r=await fetch('/api/auto/conf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ivPayload())}); const j=await r.json(); if(j.ok) toast(j.msg,'ok'); }catch(_){ }
   });
-  const iv=document.getElementById('autoInterval');
-  if(iv) iv.addEventListener('change', ()=>{
-    if(parseInt(iv.value,10) < AUTO_MIN_SEC){ iv.value=String(AUTO_MIN_SEC); toast('轮询间隔已自动调整为最短 '+AUTO_MIN_SEC+' 秒','err'); }
-    try{ fetch('/api/auto/conf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({minConf:sel.value, intervalMs:ivMs()})}); }catch(_){ }
+  // 两条路径的间隔输入框：改动即存本地偏好 + 同步后端；低于路径下限自动修正
+  ['autoIntervalDom','autoIntervalOcr'].forEach(id=>{
+    const iv=document.getElementById(id); if(!iv) return;
+    try{ const v=localStorage.getItem('txw_iv_'+id); if(v) iv.value=v; }catch(_){ }
+    iv.addEventListener('change', ()=>{
+      const eng=id==='autoIntervalDom'?'dom':'ocr';
+      const min=IV_MIN[eng];
+      if(!(parseFloat(iv.value) >= min)){ iv.value=String(min); toast('轮询间隔已自动调整为最短 '+min+' 秒','err'); }
+      try{ localStorage.setItem('txw_iv_'+id, iv.value); }catch(_){ }
+      try{ fetch('/api/auto/conf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(ivPayload())}); }catch(_){ }
+    });
   });
 }
 function setStatus(t){ document.getElementById('status').textContent=t; }
@@ -446,10 +851,12 @@ async function doScan(){
   applyScan(j);
 }
 function applyScan(j){
-  if(j.error){ setStatus(j.error); document.getElementById('courseList').innerHTML='<div class="card empty">'+j.error+'</div>'; return; }
+  // 后端失败时返回 {ok:false,msg}（没有 error 字段），旧版判 j.error 恒为假 → j.courses 为 undefined，
+  // 会把渲染带崩（"共 undefined 个课程" 且列表抛错）。改为按 ok 判定并兜底空数组。
+  if(j.ok===false){ const m=j.msg||'扫描失败'; setStatus(m); document.getElementById('courseList').innerHTML='<div class="card empty">'+m+'</div>'; return; }
   // 轮询刷新时保留用户已勾选状态
   const checked=[...document.querySelectorAll('.ck:checked')].map(x=>x.dataset.id);
-  courses=j.courses;
+  courses=j.courses||[];
   setStatus('共 '+j.count+' 个课程'+(j.hasBaseline?'（已设基线）':'（未设基线，全部视为新）')+(pollEnabled?' · 自动轮询中':''));
   renderList();
   checked.forEach(id=>{ const cb=document.querySelector('.ck[data-id="'+String(id).replace(/"/g,'\\"')+'"]'); if(cb) cb.checked=true; });
@@ -459,7 +866,7 @@ async function doPoll(){
   try{
     const r=await fetch('/api/scan?dir='+encodeURIComponent(curDir));
     const j=await r.json();
-    if(j.error) return;
+    if(j.ok===false) return;   // 后端返回 {ok:false,msg}，没有 error 字段（旧判据恒不生效）
     const now=new Map();
     for(const c of (j.courses||[])){
       const prev=lastSnap.get(c.id);
@@ -531,11 +938,14 @@ async function extractSelected(){
   const r=await fetch('/api/extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dir:curDir,ids})});
   const j=await r.json();
   setStatus('已提取 '+ids.length+' 个课程');
-  renderResults(j.courses);
+  renderResults(j.courses||[]);   // 后端异常时返回 {ok:false,msg}（无 courses），兜底避免渲染崩溃
   const errs=(j.courses||[]).filter(c=>c.error);
   if(errs.length) toast(errs.length+' 个课程提取失败：'+errs[0].error.slice(0,80),'err');
 }
 function escSrv(s){ s = (s===null||s===undefined)?'':String(s); return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// v1.6.6：属性位转义。escSrv 只保护"元素文本位"，属性位还必须处理引号，
+// 否则值里一个 " 就能截断属性、改写结构（见 dl 按钮的历史 bug）。
+function escAttr(s){ s = (s===null||s===undefined)?'':String(s); return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function fmtTime(s){ try { return new Date(s).toLocaleString('zh-CN',{hour12:false}); } catch { return s||'-'; } }
 function renderResults(list){
   const el=document.getElementById('results');
@@ -547,11 +957,38 @@ function renderResults(list){
       +'<span><span class="t">'+escSrv(c.id)+'</span> '
       +(c.courseType?'<span class="badge listen">'+escSrv(c.courseType)+'</span> ':'')
       +'<span class="m">共 '+qs.length+' 题，听力 '+c.listenCount+' 题 | 下载时间: '+fmtTime(c.downloadTime)+'</span></span>'
-      +'<span class="dl"><button onclick="dl(this,'+JSON.stringify(c.id)+',\'json\')">下载JSON</button>'
-      +'<button onclick="dl(this,'+JSON.stringify(c.id)+',\'html\')">下载HTML</button></span>'
-      +'</div><div style="overflow:auto"><table><thead><tr><th>题号</th><th>题型</th><th>题干</th><th>选项(✓正确)</th><th>答案</th><th>解析/原文</th></tr></thead><tbody>';
+      // v1.6.6 修复：原写法 JSON.stringify(c.id) 自带双引号，拼进 onclick="..." 会当场截断属性，
+      // 属性变成 dl(this,  → 点击必然抛 SyntaxError，表现为"完全无反应"（v2 复现器实测）。
+      // 现改为：值放 data-id（HTML 属性转义由 setAttribute 语义保证），onclick 只传 this。
+      +'<span class="dl"><button data-id="'+escAttr(c.id)+'" onclick="dl(this,\'json\')">下载JSON</button>'
+      +'<button data-id="'+escAttr(c.id)+'" onclick="dl(this,\'html\')">下载HTML</button></span>'
+      +'</div><div style="overflow:auto"><table class="qtbl">'
+      // 固定列宽：短题（选择题）靠这套比例排得整齐；长题走下面的通栏分支，不受此限。
+      // 解析/原文列给得最宽 —— 听力题的原文（实测 648~1411 字）都落在这一列。
+      +'<colgroup><col style="width:4%"><col style="width:8%"><col style="width:26%"><col style="width:20%"><col style="width:12%"><col style="width:30%"></colgroup>'
+      +'<thead><tr><th>题号</th><th>题型</th><th>题干</th><th>选项(✓正确)</th><th>答案</th><th>解析/原文</th></tr></thead><tbody>';
+    // 题干/答案任一超长即视为「长内容题」（读后续写、作文）—— 这类题干/范文是整篇文本，
+    // 塞进 6 列中的一格必然不可读。实测阈值区分度很大：普通选择题题干 ≤73 字、答案是单个字母；
+    // 续写/作文题干 407~2021 字、答案 878~1246 字。
+    // ⚠️ 判据**不含 analysis**：听力题的解析列装的是听力原文（648~1411 字），
+    //    那是正常的表列内容，若把它算成长题会让所有听力课都退化成通栏（实测踩过）。
+    const LONG = 200;
     for(const q of qs){
       const opts=q.options.map(o=>'<div class="'+(o.id===q.ans?'ok':'')+'">'+escSrv(o.id)+'. '+escSrv(o.text)+(o.id===q.ans?' ✓':'')+'</div>').join('');
+      const isLong=(q.qt||'').length>LONG || (q.ans||'').length>LONG;
+      if(isLong){
+        h+='<tr><td colspan="6"><div class="qb">'
+          +'<div class="qb-h">#'+escSrv(q.no)
+          +(q.type?' <span class="badge listen" style="font-size:11px">'+escSrv(q.type)+'</span>':'')
+          +(q.src?' <span class="badge listen" style="font-size:11px">'+escSrv(q.src)+'</span>':'')
+          +'</div>'
+          +(q.qt?'<div class="qb-s"><b>题干</b><div class="qb-t">'+escSrv(q.qt)+'</div></div>':'')
+          +(opts?'<div class="qb-s"><b>选项</b><div class="qb-opts">'+opts+'</div></div>':'')
+          +(q.ans?'<div class="qb-s"><b>答案</b><div class="qb-t qb-ans">'+escSrv(q.ans)+'</div></div>':'')
+          +(q.analysis?'<div class="qb-s"><b>解析/原文</b><div class="qb-t">'+escSrv(q.analysis)+'</div></div>':'')
+          +'</div></td></tr>';
+        continue;
+      }
       h+='<tr><td>'+escSrv(q.no)+'</td><td>'+escSrv(q.type||'')+(q.src?'<br><span class="badge listen" style="font-size:11px">'+escSrv(q.src)+'</span>':'')+'</td><td>'+escSrv(q.qt)+'</td><td class="opts">'+opts+'</td><td class="ans">'+escSrv(q.ans)+'</td><td class="ana">'+escSrv(q.analysis)+'</td></tr>';
     }
     h+='</tbody></table></div></div>';
@@ -559,33 +996,226 @@ function renderResults(list){
   el.innerHTML=h;
   window._last=list;
 }
-function dl(btn,id,fmt){
+// v1.6.6：下载改为「明确告知落盘位置」。
+// 原因：原实现是纯浏览器式 Blob 下载，WebView2 无 DownloadStarting 处理器 → 文件落到不可预期的
+// 默认目录，用户反馈"我根本找不到"。现在后端固定接管到 ExportDir 并回传真实路径，前端展示 + 可一键打开。
+let __expDir = '';
+function dl(btn,fmt){
+  const id = (btn && btn.getAttribute && btn.getAttribute('data-id')) || '';
   const c=(window._last||[]).find(x=>x.id===id); if(!c)return;
   let blob,text,name;
   if(fmt==='json'){ text=JSON.stringify(c,null,2); name=id+'.json'; blob=new Blob([text],{type:'application/json'}); }
   else { text=toHTML(c); name=id+'.html'; blob=new Blob([text],{type:'text/html'}); }
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  // 防抖：等后端 DownloadStarting 把落盘路径写回（同名已存在会加 (1)(2)）
+  const expect=name;
+  let tries=0;
+  const poll=async()=>{
+    tries++;
+    try{
+      const j = await (await fetch('/api/download/last',{})).json();
+      if(j && j.ok && j.last){
+        const base = j.last.split('\\').pop();
+        const baseS = base || '';
+        if(baseS===expect || baseS.indexOf(expect.replace(/\.[^.]+$/,''))===0 || tries>=4){
+          showExportTip(j.last); return;
+        }
+      }
+    }catch(_){}
+    if(tries<6) setTimeout(poll,180);
+    else { showExportTip(''); }
+  };
+  setTimeout(poll,180);
+}
+async function showExportTip(fullPath){
+  if(!__expDir){
+    try{ const j = await (await fetch('/api/download/conf',{})).json(); __expDir = (j&&j.dir)||''; }catch(_){}
+  }
+  let tip=document.getElementById('expTip');
+  if(!tip){
+    tip=document.createElement('div'); tip.id='expTip';
+    tip.className='exp-tip';
+    document.body.appendChild(tip);
+  }
+  const dir = fullPath ? fullPath.replace(/\\[^\\]+$/,'') : __expDir;
+  const file = fullPath && fullPath.indexOf('\\')>=0 ? fullPath.split('\\').pop() : '';
+  tip.innerHTML = fullPath
+    ? '<b>已保存到</b><code title="点击复制">'+escSrv(fullPath)+'</code>'
+    : '<b>已保存到</b><code title="点击复制">'+escSrv(dir||'（默认下载目录）')+'</code><span class="warn">（未取到具体文件名，请到该目录查看）</span>';
+  tip.innerHTML += '<span class="ops">'
+    +'<button data-p="'+escAttr(fullPath||'')+'" onclick="expOpen(this)">打开所在文件夹</button>'
+    +'<button data-p="'+escAttr(fullPath||dir)+'" onclick="expCopy(this)">复制路径</button>'
+    +'<button onclick="pickExpDir(true)">更改目录</button>'
+    +'<button onclick="this.parentNode.parentNode.remove()">知道了</button></span>';
+  tip.style.display='flex';
+  clearTimeout(window.__expTipT);
+  window.__expTipT=setTimeout(()=>{ const t=document.getElementById('expTip'); if(t)t.style.display='none'; }, 20000);
+}
+// v1.6.6：入口一律无参，值从按钮的 data-p 取（避免外部路径内联进 onclick 截断属性）
+function expOpen(btn){ const p=(btn&&btn.getAttribute&&btn.getAttribute('data-p'))||''; return openExpFolder(p); }
+function expCopy(btn){ const p=(btn&&btn.getAttribute&&btn.getAttribute('data-p'))||''; return copyExpText(p,btn); }
+async function openExpFolder(p){
+  let j={ok:false};
+  try{ j = await (await fetch('/api/download/open',{method:'POST',body:JSON.stringify({path:p||''})})).json(); }catch(_){}
+  if(!j.ok) alert('打开文件夹失败。路径：\n'+(p||__expDir||'（未知）')+'\n\n可手动复制上面的路径到资源管理器。');
+}
+function copyExpText(t,btn){
+  try{
+    const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+    const old=btn.textContent; btn.textContent='已复制'; setTimeout(()=>btn.textContent=old,1200);
+  }catch(_){ alert(t); }
+}
+// ---- 导出位置（常驻设置卡片）----
+// 刷新常驻卡片：显示当前目录 + 是否默认 + 是否可写
+// v1.6.6：badge 只在"确知是自定义"时才显示「自定义」。
+// 原来写 isDefault ? 默认 : 自定义 —— 后端不可用时 isDefault 是 undefined，
+// 会被判成"自定义"，把默认状态标错。现在改成三分支：显式 true=默认，显式 false=自定义，
+// 拿不到结论（undefined/null）→ 不贴标签，避免误导。
+function renderExpDir(dir, isDefault, warn){
+  __expDir = dir || '';
+  const inp = document.getElementById('expDirInput');
+  const stat = document.getElementById('expDirStat');
+  const badge = document.getElementById('expDirBadge');
+  if(inp && document.activeElement !== inp) inp.value = dir || '';
+  if(stat) stat.textContent = warn ? warn : ('当前目录：' + (dir || '（未设置）'));
+  if(badge){
+    if(isDefault === true) badge.innerHTML = '<span class="badge listen">默认</span>';
+    else if(isDefault === false) badge.innerHTML = '<span class="badge new">自定义</span>';
+    else badge.innerHTML = '';
+  }
+}
+// 读取后端当前状态并刷新卡片（页面初始化 / 设置后调用）
+async function expDirInit(){
+  try{
+    const j = await (await fetch('/api/download/conf',{})).json();
+    // 后端不可用/超时时 j 是 {ok:false,msg}（fetch 包装统一了异常），此时 j.dir 为空、
+    // j.isDefault 为 undefined。必须显式判 ok，否则会把"读不到"当成"已读到默认"。
+    if(!j || j.ok === false || !j.dir){
+      renderExpDir('', undefined, '读取导出目录失败（不影响下载，将使用默认目录）');
+      return;
+    }
+    renderExpDir(j.dir, !!j.isDefault);
+  }catch(_){ renderExpDir('', undefined, '读取导出目录失败（不影响下载，将使用默认目录）'); }
+}
+// 手动设置（输入框回车 / onchange / 恢复默认按钮）。空字符串 = 恢复默认。
+async function setExpDir(dir){
+  const p = (dir===null||dir===undefined) ? '' : String(dir);
+  let j = {ok:false};
+  try{ j = await (await fetch('/api/download/set',{method:'POST',body:JSON.stringify({dir:p})})).json(); }catch(e){ j = {ok:false, msg:'调用失败：'+e.message}; }
+  if(j.dir) renderExpDir(j.dir, !!j.isDefault);
+  toast(j.ok ? (j.isDefault ? '已恢复默认导出目录' : '导出目录已更新') : (j.msg||'设置失败'), j.ok?'ok':'err');
+  if(!j.ok && j.msg) alert(j.msg);
+}
+// 打开当前导出目录（不依赖"最近一次导出"）
+async function openExpDirNow(){
+  let j = {ok:false};
+  try{ j = await (await fetch('/api/download/opendir',{method:'POST',body:'{}'})).json(); }catch(_){}
+  if(j.dir) renderExpDir(j.dir);
+  if(!j.ok) alert('打开文件夹失败。路径：\n'+(j.dir||__expDir||'（未知）'));
+}
+async function pickExpDir(fromCard){
+  let j={ok:false};
+  try{ j = await (await fetch('/api/download/pick',{method:'POST',body:'{}'})).json(); }catch(_){}
+  if(j.dir) renderExpDir(j.dir, !!j.isDefault);
+  // 常驻卡片模式下不弹「已取消」打扰用户；提示条模式保留原有 alert 行为
+  if(fromCard){ if(j.ok) toast('导出目录已更新','ok'); else if(j.msg && j.msg!=='已取消') alert(j.msg); return; }
+  if(j.msg) alert(j.msg);
 }
 function toHTML(c){
+  // 与 renderResults 用同一套排版规则：长内容题（读后续写/作文）通栏分节，
+  // 否则 6 列固定宽度会把 2000 字的题干挤成一条窄柱。
+  // 判据同样**只看题干/答案**：听力题的解析列装听力原文，属正常表列内容。
+  const LONG=200;
   let rows='';
   for(const q of (c.questions||[])){
     const opts=q.options.map(o=>'<div class="'+(o.id===q.ans?'ok':'')+'">'+escSrv(o.id)+'. '+escSrv(o.text)+(o.id===q.ans?' ✓':'')+'</div>').join('');
+    const isLong=(q.qt||'').length>LONG || (q.ans||'').length>LONG;
+    if(isLong){
+      rows+='<tr><td colspan="6"><div class="qb">'
+        +'<div class="qb-h">#'+escSrv(q.no)+(q.type?' ['+escSrv(q.type)+']':'')+(q.src?' ('+escSrv(q.src)+')':'')+'</div>'
+        +(q.qt?'<div class="qb-s"><b>题干</b><div class="qb-t">'+escSrv(q.qt)+'</div></div>':'')
+        +(opts?'<div class="qb-s"><b>选项</b><div>'+opts+'</div></div>':'')
+        +(q.ans?'<div class="qb-s"><b>答案</b><div class="qb-t qb-ans">'+escSrv(q.ans)+'</div></div>':'')
+        +(q.analysis?'<div class="qb-s"><b>解析/原文</b><div class="qb-t">'+escSrv(q.analysis)+'</div></div>':'')
+        +'</div></td></tr>';
+      continue;
+    }
     rows+='<tr><td>'+escSrv(q.no)+'</td><td>'+escSrv(q.type||'')+(q.src?'<br>('+escSrv(q.src)+')':'')+'</td><td>'+escSrv(q.qt)+'</td><td>'+opts+'</td><td class="ans">'+escSrv(q.ans)+'</td><td>'+escSrv(q.analysis)+'</td></tr>';
   }
   return '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>'+escSrv(c.id)+'</title>'
-    +'<style>body{font-family:system-ui,sans-serif;margin:20px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top}.ok{color:#0f8a5f;font-weight:700}.ans{color:#cf3328;font-weight:700}</style>'
+    +'<style>body{font-family:system-ui,sans-serif;margin:20px}'
+    +'table{border-collapse:collapse;width:100%;font-size:13px;table-layout:fixed}'
+    +'th,td{border:1px solid #ccc;padding:6px 8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}'
+    +'.ok{color:#0f8a5f;font-weight:700}.ans{color:#cf3328;font-weight:700;white-space:pre-wrap;word-break:break-word}'
+    +'.qb-h{font-weight:600;color:#555;margin-bottom:2px}.qb-s{margin-top:10px}'
+    +'.qb-s>b{display:block;font-size:11.5px;color:#888;margin-bottom:3px}'
+    +'.qb-t{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}.qb-ans{color:#cf3328;font-weight:600}'
+    +'</style>'
     +'</head><body><h2>'+escSrv(c.id)+(c.courseType?' ('+escSrv(c.courseType)+')':'')+'</h2>'
     +'<p style="color:#666;font-size:13px;margin:4px 0 14px">下载时间: '+(c.downloadTime?fmtTime(c.downloadTime):'-')+'</p>'
-    +'<table><thead><tr><th>题号</th><th>题型</th><th>题干</th><th>选项</th><th>答案</th><th>解析/原文</th></tr></thead><tbody>'+rows+'</tbody></table></body></html>';
+    +'<table><colgroup><col style="width:4%"><col style="width:8%"><col style="width:26%"><col style="width:20%"><col style="width:12%"><col style="width:30%"></colgroup>'
+    +'<thead><tr><th>题号</th><th>题型</th><th>题干</th><th>选项</th><th>答案</th><th>解析/原文</th></tr></thead><tbody>'+rows+'</tbody></table></body></html>';
 }
 // ---- 选项卡 + hash 导航（浏览器前进/后退也可用）----
 function showTab(t, skipHash){
   document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
   document.querySelectorAll('.tabpane').forEach(p=>p.classList.toggle('active',p.id==='tab-'+t));
-  if(t==='auto' && !window._autoWinLoaded){ window._autoWinLoaded=true; autoRefresh(); }
+  if(t==='auto'){ probeClient(); mcRefresh(); if(!window._autoWinLoaded){ window._autoWinLoaded=true; autoRefresh(); } }
+  if(t==='cap'){ capMcRefresh(); }
   if(!skipHash){ try{ history.replaceState(null,'','#'+t); }catch(_){ try{ location.hash=t; }catch(_){ } } }
 }
-window.addEventListener('hashchange',()=>{ const h=(location.hash||'').replace('#',''); if(['scan','bank','auto','cap'].includes(h)) showTab(h,true); });
+window.addEventListener('hashchange',()=>{ const h=(location.hash||'').replace('#',''); if(['scan','bank','auto','cap','report'].includes(h)) showTab(h,true); });
+
+// ================= 作文报告 =================
+let __report = null;
+async function reportExtract(){
+  const btn=document.getElementById('reportBtn'), st=document.getElementById('reportStatus');
+  if(btn) btn.disabled=true;
+  if(st) st.textContent='正在连接客户端报告页…';
+  try{
+    const j=await __call('/api/report/extract', {});
+    __report=j; renderReport(j);
+  }catch(e){
+    if(st) st.textContent='提取失败: '+(e&&e.message?e.message:e);
+  }finally{ if(btn) btn.disabled=false; }
+}
+function renderReport(j){
+  const st=document.getElementById('reportStatus'), box=document.getElementById('reportResult');
+  if(!box) return;
+  if(!j || j.ok===false){
+    const msg=(j&&j.msg)||'提取失败';
+    if(st) st.textContent=msg;
+    const cand=(j&&j.candidates&&j.candidates.length)
+      ? '<div class="hint" style="margin-top:10px">当前客户端里的页面：<br>'+j.candidates.map(escSrv).join('<br>')+'</div>' : '';
+    box.innerHTML='<div class="card empty" style="margin-top:14px">'+escSrv(msg)+cand+'</div>';
+    return;
+  }
+  if(st) st.textContent='已提取 '+j.chars+' 字 · 已保存到导出目录';
+  // 注意：报告正文/路径是「远端内容」，**绝不能**内联进 onclick 属性（正文里一个引号或 </button> 就能把
+  // 标记截断，甚至注入）。因此按钮一律走无参函数，值从 __report 里取。
+  const ops=''
+    +'<button class="primary" onclick="reportOpen()">打开报告（HTML）</button>'
+    +'<button onclick="reportOpenFolder()">打开所在文件夹</button>'
+    +'<button onclick="reportCopy(this)">复制正文</button>';
+  box.innerHTML='<div class="card" style="margin-top:14px">'
+    +'<div class="ct">提取结果<span class="cd">'+escSrv(j.msg||'')+'</span></div>'
+    +'<div class="toolbar">'+ops+'</div>'
+    +'<div class="hint" style="margin:8px 0">报告页：<code>'+escSrv((j.url||'').slice(0,150))+'</code><br>已保存：<code>'+escSrv(j.txt||'')+'</code></div>'
+    +'<pre class="console" style="max-height:46vh;white-space:pre-wrap">'+escSrv(j.text||'')+'</pre>'
+    +'</div>';
+}
+async function reportOpenFolder(){
+  await openExpFolder((__report&&__report.html)||'');
+}
+function reportCopy(btn){
+  copyExpText((__report&&__report.text)||'', btn);
+}
+async function reportOpen(){
+  let j={ok:false};
+  try{ j=await (await fetch('/api/report/open',{method:'POST',body:JSON.stringify({path:(__report&&__report.html)||''})})).json(); }catch(_){}
+  if(!j.ok) alert('打开失败。可点「打开所在文件夹」，再双击其中的 .html 文件查看。');
+}
 async function bankRebuild(){ BANK=null; document.getElementById('bankStatus').textContent='索引已重置，下次匹配时重建'; toast('题库索引已重置，下次匹配时自动重建'); }
 async function bankMatch(){
   const paper=document.getElementById('bankPaper').value;
@@ -600,7 +1230,10 @@ async function bankMatch(){
   renderBankResult(j);
 }
 function renderBankResult(j){
-  document.getElementById('bankCount').textContent=j.bankCount;
+  // 后端异常时返回 {ok:false,msg}（没有 bankCount/questions）→ 直接渲染会把 undefined 铺到界面上
+  if(j && j.ok===false){ const b0=document.getElementById('bankCountBadge'); if(b0) b0.textContent='题库 —';
+    document.getElementById('bankStatus').textContent=j.msg||'查询失败'; return; }
+  const bc=document.getElementById('bankCountBadge'); if(bc) bc.textContent='题库 '+j.bankCount+' 题';
   document.getElementById('bankStatus').textContent='题库 '+j.bankCount+' 题';
   const mappedN=(j.questions||[]).filter(q=>q.mapped).length;
   let h=(mappedN?'<div class="info-card" style="margin-top:-6px">其中 '+mappedN+' 题已按<b>选项内容</b>对应到本题选项（选项顺序被天学网打乱也不影响）——答案字母旁的绿色文字即本题中的原选项。</div>':'');
@@ -632,7 +1265,7 @@ function renderBankResult(j){
       +'<td>'+escSrv(q.qt)+optsHtml+'</td>'
       +'<td><span class="'+cls+'">'+escSrv(q.conf)+'</span></td>'
       +'<td>'+(q.src?'<span class="badge listen">'+escSrv(q.src)+'</span><br><span style="font-size:12px;color:var(--sub)">'+escSrv(q.srcQt)+'</span>':'-')
-      +(q.srcFile?'<br><a class="src-link" href="javascript:void(0)" onclick="openSource(\''+encodeURIComponent(q.srcFile)+'\')">查看源文件 ↗</a>':'')+'</td>'
+      +(q.srcFile?'<br><a class="src-link" href="javascript:void(0)" data-f="'+escAttr(q.srcFile)+'" onclick="srcOpen(this)">查看源文件 ↗</a>':'')+'</td>'
       +'<td>'+(q.ans?escSrv(q.ans)+(q.bankAnsText?' <span style="color:var(--new)">('+escSrv(q.bankAnsText)+')</span>':''):'-')+'</td>'
       +'<td style="min-width:170px">'+ansCell+'</td></tr>';
   }
@@ -671,7 +1304,7 @@ async function ocrRun(){
     const ta=document.getElementById('bankPaper');
     ta.value=j.joined;
     try{ localStorage.setItem('txw_bankPaper',j.joined); }catch(_){}
-    document.getElementById('ocrStatus').textContent='识别完成: '+j.count+' 行 · 引擎='+j.engine+' · 已自动填入并触发匹配';
+    document.getElementById('ocrStatus').textContent='识别完成: '+j.count+' 行 · 已自动填入并触发匹配';
     toast('识别完成 '+j.count+' 行,自动匹配中','ok');
     bankMatch();
   }catch(e){
@@ -681,6 +1314,25 @@ async function ocrRun(){
 }
 // ---- 自动回答 ----
 let autoTimer = null;
+// 答题路径（两条路径相互独立）：持久化用户选择，默认 DOM 直连
+let __autoPath = (function(){ try{ return localStorage.getItem('txw_autoPath')==='ocr'?'ocr':'dom'; }catch(_){ return 'dom'; } })();
+function engineMode(){ return __autoPath; }
+function setPath(p){
+  __autoPath = (p==='ocr')?'ocr':'dom';
+  try{ localStorage.setItem('txw_autoPath', __autoPath); }catch(_){ }
+  document.getElementById('pathDom').classList.toggle('sel', __autoPath==='dom');
+  document.getElementById('pathOcr').classList.toggle('sel', __autoPath==='ocr');
+  document.getElementById('pathDomPanel').style.display = __autoPath==='dom' ? '' : 'none';
+  document.getElementById('pathOcrPanel').style.display = __autoPath==='ocr' ? '' : 'none';
+  // 恢复该路径已保存的间隔偏好：localStorage 优先，其次后端 config 已载入的值，最后才是内置默认
+  // （旧版这里硬编码 '2'/'20'，会在 WebView2 缓存被清后把用户已保存的间隔顶掉，且与 minConf 的回退口径不一致）
+  const iv=ivInput(); if(iv){
+    let v=null; try{ v=localStorage.getItem('txw_iv_'+iv.id); }catch(_){ }
+    const back=(window.__ivBackend&&window.__ivBackend[__autoPath]!==undefined)?window.__ivBackend[__autoPath]:IV_DEF[__autoPath];
+    iv.value = v || String(back);
+  }
+  if(__autoPath==='ocr') autoRefresh();
+}
 async function autoRefresh(){
   const sel=document.getElementById('autoWin');
   const old=sel.value;
@@ -703,9 +1355,14 @@ async function autoRefresh(){
   }catch(e){ toast('刷新窗口列表失败: '+e.message,'err'); }
 }
 async function autoLaunch(){
-  const r=await fetch('/api/auto/launch',{method:'POST'}); const j=await r.json();
-  if(j.ok){ toast(j.msg,'ok'); }
-  else if(j.needInstall){
+  // 两种引擎共用：未检测到客户端时都要触发自动下载安装（后端以 needInstall 标记）
+  const dom = engineMode()==='dom';
+  const r=await fetch(dom?'/api/auto/launchdom':'/api/auto/launch',{method:'POST'}); const j=await r.json();
+  if(j.ok){
+    toast(j.msg,'ok');
+    // DOM 模式：由本工具以调试模式启动客户端
+    if(dom) toast('客户端正以调试模式启动，稍后点【开始自动回答】','ok');
+  } else if(j.needInstall){
     // 首次使用：自动下载并安装到用户自选目录（与程序分立）
     toast('未检测到客户端，正在准备自动安装向导…','ok');
     try{ await __call('/api/auto/install', {}); }catch(e){ toast('发起安装失败: '+e.message,'err'); }
@@ -720,19 +1377,27 @@ async function pickClientDir(){
   }catch(e){ toast('选择位置失败: '+e.message,'err'); }
 }
 async function autoStart(){
+  const dom = engineMode()==='dom';
   const sel=document.getElementById('autoWin');
   const win=sel.value;
-  if(!win){ toast('请先选择目标窗口（客户端打开后点【刷新窗口】）','err'); return; }
-  // 由用户自行确认窗口（可能是标题也可能是进程名，服务端按进程名优先）
+  if(!dom && !win){ toast('请先选择目标窗口（客户端打开后点【刷新窗口】）','err'); return; }
   const intervalMs=ivMs();
   const minConf=document.getElementById('minConf').value;
   const dir=document.getElementById('dir').value.trim()||curDir;
   document.getElementById('autoStartBtn').disabled=true;
   document.getElementById('autoStopBtn').disabled=false;
-  toast('开始自动回答（点击后请在客户端中确认开始测试）','ok');
-  const r=await fetch('/api/auto/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:win,proc:'',intervalMs,minConf,dir})});
+  toast(dom?'开始自动回答（DOM 直连 · 无需选窗口）':'开始自动回答（点击后请在客户端中确认开始测试）','ok');
+  const r=await fetch('/api/auto/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:win,proc:'',intervalMs,minConf,dir,engine:dom?'dom':'ocr'})});
   const j=await r.json();
-  if(!j.ok){ document.getElementById('autoStartBtn').disabled=false; document.getElementById('autoStopBtn').disabled=true; toast(j.msg,'err'); return; }
+  if(!j.ok){
+    document.getElementById('autoStartBtn').disabled=false; document.getElementById('autoStopBtn').disabled=true;
+    if(j.needInstall){
+      // 未装客户端：引导自动下载安装（与「启动客户端」同一套后端流程）
+      toast('未检测到客户端，正在准备自动安装向导…','ok');
+      try{ await __call('/api/auto/install', {}); }catch(e){ toast('发起安装失败: '+e.message,'err'); }
+    } else { toast(j.msg,'err'); }
+    return;
+  }
   autoPoll();
 }
 async function autoStop(){
@@ -747,21 +1412,69 @@ async function autoPoll(){
     const r=await fetch('/api/auto/status'); const j=await r.json();
     document.getElementById('autoLog').textContent=(j.log||[]).join('\n')||'(未开始)';
     const dur=j.startedAt?((Date.now()-j.startedAt)/1000).toFixed(0)+'s':'';
+    const eng=j.engine==='dom'?'DOM直连':(j.engine==='ocr'?'OCR':'');
+    const pages=j.pages?(' · 翻页 '+j.pages):'';
+    const pkw=(j.pkWords!=null&&j.engine==='dom')?(' · PK词库 '+(j.pkWords?(j.pkWords+' 词'):'待抓取')):'';
     document.getElementById('autoStat').textContent=j.running
-      ?('运行中 · 第 '+j.round+' 轮 · 已点击 '+j.clicked+' · 界面稳定 '+j.unchanged+' 轮 · '+dur)
-      :(j.round||j.endDetected?('已停止'+(j.endDetected?'(检测到成绩页✅)':'')+' · 共 '+j.round+' 轮 · 点击 '+j.clicked+' · '+dur):'');
+      ?('运行中'+(eng?'['+eng+']':'')+' · 第 '+j.round+' 轮 · 已点击 '+j.clicked+pages+pkw+' · '+dur)
+      :(j.round||j.endDetected?('已停止'+(j.endDetected?'(检测到成绩页✅)':'')+' · 共 '+j.round+' 轮 · 点击 '+j.clicked+pages+pkw+' · '+dur):'');
     const pv=(j.preview||[]).map(l=>l.t).join('\n');
     document.getElementById('autoPreview').textContent=pv||'(暂无)';
     if(autoTimer) clearTimeout(autoTimer);
     autoTimer=setTimeout(autoPoll, 1000);
   }catch(e){ if(autoTimer) clearTimeout(autoTimer); autoTimer=setTimeout(autoPoll, 3000); }
 }
-// ---- 抓包 ----
-async function capStart(){ const r=await fetch('/api/capture/start',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); capList(); }
-async function capStop(){ const r=await fetch('/api/capture/stop',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); }
-async function capLaunch(){ const r=await fetch('/api/capture/launch',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); }
-async function capList(){ const r=await fetch('/api/capture/log'); const j=await r.json(); document.getElementById('capLog').textContent=j.log; }
-async function capTest(){ const el=document.getElementById('capStatus'); el.textContent='测试中…'; const r=await fetch('/api/capture/test'); const j=await r.json(); el.textContent='【测试】'+j.msg; toast(j.msg, j.ok?'ok':'err'); capList(); }
+// ---- 抓包拉题库（下载接管，与自动回答页「无痕下载接管」共用 /api/mc/*）----
+let capMcTimer=null;
+async function capMcStart(){ const r=await fetch('/api/mc/start',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); capMcRefresh(); if(!capMcTimer) capMcTimer=setInterval(capMcRefresh,3000); }
+async function capMcStop(){ const r=await fetch('/api/mc/stop',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); capMcRefresh(); }
+async function capMcCache(){ if(!confirm('确认删除课程缓存 flipbooks？删除后重新打开课程会自动重新下载。')) return; const r=await fetch('/api/mc/cache',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); }
+async function capMcClear(){ if(!confirm('确认清空已抓取的题库答案缓存？该操作不可恢复（不影响客户端课程缓存与扫描题库）。')) return; const r=await fetch('/api/mc/clear',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); capMcRefresh(); }
+async function capMcRefresh(){
+  try{
+    const r=await fetch('/api/mc/status'); const j=await r.json();
+    if(!j.ok) return;
+    document.getElementById('capStatus').textContent = (j.running? '接管中' : '未运行') + ` · 缓存答案 ${j.answers} 条` + (j.words ? ` · PK词库 ${j.words} 词` : '');
+    syncMcMetrics(j);
+    document.getElementById('capLog').textContent = j.log || '(日志为空)';
+    const ar=await fetch('/api/mc/answers'); const a=await ar.json();
+    document.getElementById('capAnswers').textContent = Array.isArray(a)&&a.length ? a.map((x,i)=>`${i+1}. 【${(x.qt||'').slice(0,90)}】\n   → ${x.ans}`).join('\n') : '(暂无答案；下载课程后自动生成)';
+  }catch(e){}
+}
+// ---- 假私有云（minicloud） ----
+let mcTimer=null;
+async function mcStart(){ const r=await fetch('/api/mc/start',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); mcRefresh(); if(!mcTimer) mcTimer=setInterval(mcRefresh,3000); }
+async function mcStop(){ const r=await fetch('/api/mc/stop',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); mcRefresh(); }
+async function mcCache(){ if(!confirm('确认删除课程缓存 flipbooks？删除后重新打开课程会自动重新下载。')) return; const r=await fetch('/api/mc/cache',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); }
+async function mcClear(){ if(!confirm('确认清空已抓取的题库答案缓存？该操作不可恢复（不影响客户端课程缓存与扫描题库）。')) return; const r=await fetch('/api/mc/clear',{method:'POST'}); const j=await r.json(); toast(j.msg, j.ok?'ok':'err'); mcRefresh(); }
+// ---- 清理安装包（手动触发，二次确认）----
+async function clearInstaller(){
+  const r = await fetch('/api/client/installerinfo'); const j = await r.json();
+  if(!j.ok){ toast(j.msg||'获取安装包信息失败','err'); return; }
+  if(j.count === 0){ toast('没有可删除的安装包'); return; }
+  let h = '';
+  for(const f of j.files){ h += '<div style="padding:5px 0;border-bottom:1px solid var(--sep);font-size:12.5px;word-break:break-all">'+escSrv(f.path)+' <span class="cd">('+Math.round(f.size/1048576*10)/10+' MB)</span></div>'; }
+  document.getElementById('ciList').innerHTML = h;
+  document.getElementById('ciTotal').textContent = (j.totalMb||0)+' MB';
+  document.getElementById('clearInstallerModal').style.display = 'flex';
+}
+function closeClearInstaller(){ const m = document.getElementById('clearInstallerModal'); if(m) m.style.display = 'none'; }
+async function doClearInstaller(){
+  closeClearInstaller();
+  const r = await fetch('/api/client/installerclear'); const j = await r.json();
+  toast(j.msg || (j.ok ? '已清理' : '清理失败'), j.ok ? 'ok' : 'err');
+}
+async function mcRefresh(){
+  try{
+    const r=await fetch('/api/mc/status'); const j=await r.json();
+    if(!j.ok) return;
+    document.getElementById('mcStatus').textContent = (j.running? '接管中' : '未运行') + ` · 缓存答案 ${j.answers} 条` + (j.words ? ` · PK词库 ${j.words} 词` : '');
+    syncMcMetrics(j);   // ⚠️ 必留：否则「接管状态」指标卡永不刷新（只同步抓包页是错的）
+    document.getElementById('mcLog').textContent = j.log || '(日志为空)';
+    const ar=await fetch('/api/mc/answers'); const a=await ar.json();
+    document.getElementById('mcAnswers').textContent = Array.isArray(a)&&a.length ? a.map((x,i)=>`${i+1}. 【${(x.qt||'').slice(0,90)}】\n   → ${x.ans}`).join('\n') : '(暂无答案；下载课程后自动生成)';
+  }catch(e){}
+}
 // ---- Toast ----
 function toast(msg, type){
   const wrap=document.getElementById('toasts');
@@ -779,14 +1492,19 @@ async function openKeys(){
   await refreshKeys();
 }
 function closeKeys(){ document.getElementById('keyModal').style.display='none'; }
+function openHelp(){ document.getElementById('helpModal').style.display='flex'; }
+function closeHelp(){ document.getElementById('helpModal').style.display='none'; }
 async function refreshKeys(){
   const r=await fetch('/api/keys'); const j=await r.json();
   document.getElementById('keyCount').textContent=j.count;
+  const fmtEl=document.getElementById('keyFmt');
+  if(fmtEl){ if(j.format){ fmtEl.style.display=''; fmtEl.textContent='当前在用 '+j.format; } else fmtEl.style.display='none'; }
   let h='';
   for(const k of j.keys){
     h+='<div class="key-row"><code>'+escSrv(k.masked)+'</code>'
+      +(k.fmt?'<span class="badge listen">'+k.fmt+'</span>':'')
       +(k.active?'<span class="badge new">在用</span>':'')
-      +(k.builtin?'<span class="badge listen">内置</span>':'<button class="del" onclick="delKey(\''+k.key+'\')">删除</button>')
+      +(k.builtin?'<span class="badge listen">内置</span>':'<button class="del" data-k="'+escAttr(k.key)+'" onclick="keyDel(this)">删除</button>')
       +'</div>';
   }
   document.getElementById('keyList').innerHTML=h||'<div class="hint">（无）</div>';
@@ -802,6 +1520,8 @@ async function addKey(){
   toast(j.msg, j.ok?'ok':'err');
   if(j.ok){ inp.value=''; refreshKeys(); }
 }
+// v1.6.6：入口无参，密钥值从 data-k 取（原写法把密钥裸插进单引号字符串，含 ' 即截断属性）
+function keyDel(btn){ const k=(btn&&btn.getAttribute&&btn.getAttribute('data-k'))||''; return delKey(k); }
 async function delKey(k){
   const r=await fetch('/api/keys/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
   const j=await r.json();
@@ -811,7 +1531,7 @@ async function delKey(k){
 }
 async function discoverKeys(){
   const msgEl=document.getElementById('keyMsg');
-  msgEl.textContent='正在扫描客户端并试解样本，请稍候…';
+  msgEl.textContent='正在查找可用凭据并验证，请稍候…';
   const dir=document.getElementById('dir').value.trim()||curDir;
   const exe=document.getElementById('exePath').value.trim();
   const r=await fetch('/api/keys/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dir,exe})});
@@ -820,6 +1540,75 @@ async function discoverKeys(){
   toast(j.msg, j.ok&&j.found?'ok':(j.ok?'':'err'));
   refreshKeys();
 }
+// ② 从客户端运行态查找（需管理员 + 客户端在运行 + 已打开目标练习）
+async function huntKeys(){
+  const msgEl=document.getElementById('keyMsg');
+  msgEl.textContent='正在查找可用凭据（可能需要几十秒，请保持客户端处于目标练习页面）…';
+  const dir=document.getElementById('dir').value.trim()||curDir;
+  let j;
+  try{ j=await __call('/api/keys/hunt',{dir}); }catch(e){ j={ok:false,msg:'调用失败: '+e.message}; }
+  msgEl.textContent=j.msg||'';
+  toast(j.msg||'', j.ok&&j.found?'ok':(j.ok?'':'err'));
+  refreshKeys();
+}
+// ③ 导出客户端资源（需客户端以调试模式运行）
+async function dumpClient(){
+  const msgEl=document.getElementById('keyMsg');
+  msgEl.textContent='正在导出客户端资源…（需客户端已用「启动客户端（调试模式）」启动）';
+  let j;
+  try{ j=await __call('/api/keys/dumpclient',{}); }catch(e){ j={ok:false,msg:'调用失败: '+e.message}; }
+  msgEl.textContent=j.msg||'';
+  toast(j.msg||'', j.ok?'ok':'err');
+}
+// ================= 指标卡 =================
+// 原则：只呈现有后端支撑的状态，绝不显示"命中多少题"之类无源统计（用户会自己看列表）。
+function setMetric(hostId, valId, subId, val, sub, on){
+  const host=hostId?document.getElementById(hostId):null;
+  if(host) host.classList.toggle('on', !!on);
+  const v=valId?document.getElementById(valId):null; if(v&&val!=null) v.textContent=val;
+  const s=subId?document.getElementById(subId):null; if(s&&sub!=null) s.textContent=sub;
+}
+// 接管状态 / 缓存答案：来自 /api/mc/status（自动回答页与抓包页共享同一套状态）
+function syncMcMetrics(j){
+  const n=j.answers||0, w=j.words||0, stale=!!j.hostsStale;
+  // stale：上次异常退出后残留的接管设置未还原 → 客户端下载会失败，必须提示还原
+  const sub = j.running ? ('缓存答案 '+n+' 条'+(w?(' · PK词库 '+w+' 词'):''))
+                        : (stale ? '检测到残留接管设置，点「停止接管」即可还原' : '启动后可抓取答案');
+  setMetric('mMc','mMcVal','mMcSub', j.running?'接管中':(stale?'残留未清':'未运行'), sub, j.running);
+  setMetric('mCap','mCapVal','mCapSub', j.running?'接管中':(stale?'残留未清':'未运行'), sub, j.running);
+  setMetric('mCapAns','mCapAnsVal',null, String(n), null, true);
+}
+// 课程总数 / 可解密：来自 /api/scan
+function syncScanMetrics(j){
+  const list=j.courses||[];
+  const dec=list.filter(c=>c.extractable).length;
+  const n=j.count!=null?j.count:list.length;
+  setMetric(null,'mCourseVal','mCourseSub', String(n), j.hasBaseline?'已设基线':'未设基线，全部视为新', true);
+  setMetric(null,'mDecVal',null, String(dec), null, dec>0);
+}
+// 客户端连接：/api/auto/windows 中是否存在天学网客户端窗口（排除本工具自身 WebUI 窗口）
+async function probeClient(){
+  try{
+    const r=await fetch('/api/auto/windows'); const j=await r.json();
+    const hit=(j.windows||[]).filter(w=>/天学网/.test(w.title||'') && !/答案提取/.test(w.title||''));
+    setMetric('mClient','mClientVal','mClientSub',
+      hit.length?'已运行':'未检测到',
+      hit.length?(hit.length+' 个窗口'):'启动客户端后可连接',
+      hit.length>0);
+  }catch(e){ }
+}
+// ---- 深色模式 ----
+function applyTheme(t){
+  document.documentElement.classList.toggle('dark', t==='dark');
+  const b=document.getElementById('themeBtn');
+  if(b){ b.textContent = t==='dark' ? '☀' : '☾'; b.title = t==='dark' ? '切换到浅色' : '切换到深色'; }
+  try{ localStorage.setItem('txw_theme', t); }catch(e){}
+}
+function toggleTheme(){
+  const cur = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  applyTheme(cur==='dark' ? 'light' : 'dark');
+}
+applyTheme(window.__txwTheme || 'light');
 init();
 </script>
 </body></html>

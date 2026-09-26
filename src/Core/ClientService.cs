@@ -27,9 +27,31 @@ public static class ClientService
     static readonly string[] NameKeys = { "up366", "student", "天学网学生端" };
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
 
-    /// <summary>已记录的客户端路径（launcher/config 中且文件存在）。</summary>
-    public static string? Configured(AppConfig cfg) =>
-        !string.IsNullOrWhiteSpace(cfg.ClientExe) && File.Exists(cfg.ClientExe) ? cfg.ClientExe : null;
+    /// <summary>判定文件名 / 进程名是否"像安装包 / 卸载程序"而非客户端本体。true = 像安装包（应排除）。
+    /// 兜底方向：不确定时返回 false（当作客户端本体），绝不把真客户端误杀。
+    /// 依据：① 文件名（去扩展名）含 install / setup / unins / updater；② 文件名以官方安装包前缀 <c>up366student-</c> 开头。</summary>
+    public static bool LooksLikeInstaller(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return false;
+        var n = Path.GetFileNameWithoutExtension(fileName); // 同时兼容传进程名（无扩展名）
+        if (string.IsNullOrEmpty(n)) return false;
+        if (n.StartsWith("up366student-", StringComparison.OrdinalIgnoreCase)) return true; // 官方命名：up366student-{版本}[.{构建号}]
+        return new[] { "install", "setup", "unins", "updater" }
+            .Any(k => n.Contains(k, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>配置里记录的客户端路径，且必须是"客户端本体"——文件存在 + 不像安装包/卸载程序。
+    /// v1.6.4：历史上 <see cref="Running"/> 会把"安装包进程"当成客户端，把<strong>安装包路径</strong>写进
+    /// config（实测踩到：config.ClientExe 指向 up366student-6.13.0.exe）。若这里只判 File.Exists，
+    /// 那个坏值会永久生效并<strong>短路掉后面所有正确的查找</strong>——所以必须在这里也拦一道。
+    /// 失效时返回 null，让调用方回落到 Running()/Search()（下次成功启动会回写正确路径，自愈）。</summary>
+    public static string? ConfigClientExe(AppConfig cfg) =>
+        !string.IsNullOrWhiteSpace(cfg.ClientExe) && File.Exists(cfg.ClientExe)
+        && !LooksLikeInstaller(cfg.ClientExe)
+            ? cfg.ClientExe : null;
+
+    /// <summary>已记录的客户端路径（launcher/config 中且文件存在，且不是安装包）。</summary>
+    public static string? Configured(AppConfig cfg) => ConfigClientExe(cfg);
 
     /// <summary>正在运行的客户端进程路径。用 QueryFullProcessImageName 取路径（PROCESS_QUERY_LIMITED_INFORMATION，
     /// 权限要求低，避免 MainModule 在权限/架构差异下抛异常导致误判"未检测到客户端"）。</summary>
@@ -43,6 +65,7 @@ public static class ClientService
                 try { name = p.ProcessName; } catch { continue; }
                 if (!NameKeys.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase))) continue;
                 if (name.Contains("天学网答案提取", StringComparison.Ordinal)) continue; // 排除本工具
+                if (LooksLikeInstaller(name)) continue; // 排除安装包 / 卸载程序进程
                 string? path = ProcessPath(p.Id);
                 if (!string.IsNullOrEmpty(path) && File.Exists(path) &&
                     path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
@@ -63,6 +86,7 @@ public static class ClientService
                 string name = "";
                 try { name = p.ProcessName; } catch { continue; }
                 if (name.Contains("天学网答案提取", StringComparison.Ordinal)) continue;
+                if (LooksLikeInstaller(name)) continue; // 排除安装包 / 卸载程序进程
                 if (NameKeys.Any(k => name.Contains(k, StringComparison.OrdinalIgnoreCase))) return true;
             }
         }
@@ -121,7 +145,11 @@ public static class ClientService
         try
         {
             foreach (var f in Directory.EnumerateFiles(dir))
-                if (names.Contains(Path.GetFileName(f).ToLowerInvariant())) return f;
+                if (names.Contains(Path.GetFileName(f).ToLowerInvariant()))
+                {
+                    if (LooksLikeInstaller(f)) continue; // 精确命中后再排除安装包
+                    return f;
+                }
             if (depth == maxDepth) return null;
             foreach (var d in Directory.EnumerateDirectories(dir))
             {
@@ -139,11 +167,18 @@ public static class ClientService
     public static string? Find(AppConfig cfg) => Configured(cfg) ?? Running() ?? Search();
 
     /// <summary>拉起客户端（已运行则激活到前台；否则用 exe 所在目录作为工作目录启动）。</summary>
-    public static string Launch(string exe)
+    public static string Launch(string exe) => Launch(exe, "");
+
+    /// <summary>
+    /// 拉起客户端并附加 Chromium/Node 命令行开关。
+    /// DOM 直连模式必须走这个重载：必须由本工具带 <c>--remote-debugging-port-u3=9222</c>
+    /// （+ <c>--inspect=9229</c> 主进程调试口）启动，客户端才会开出 CDP 端口。
+    /// </summary>
+    public static string Launch(string exe, string extraArgs)
     {
         if (string.IsNullOrEmpty(exe) || !File.Exists(exe)) return "客户端 exe 不存在: " + exe;
 
-        // 已在运行 → 激活
+        // 已在运行 → 激活（注意：此时新参数不会生效，需先完全退出客户端）
         try
         {
             foreach (var p in Process.GetProcesses())
@@ -153,7 +188,9 @@ public static class ClientService
                 if (string.Equals(path, exe, StringComparison.OrdinalIgnoreCase))
                 {
                     if (p.MainWindowHandle != IntPtr.Zero) WinApi.Activate(p.MainWindowHandle);
-                    return "天学网客户端已在运行，已激活到前台";
+                    return extraArgs.Length == 0
+                        ? "天学网客户端已在运行，已激活到前台"
+                        : "天学网客户端已在运行 —— 调试参数需先【完全退出客户端】再启动才生效";
                 }
             }
         }
@@ -163,12 +200,13 @@ public static class ClientService
         {
             var psi = new ProcessStartInfo(exe)
             {
-                // 关键：工作目录必须是 exe 所在目录
+                // 关键：工作目录必须是 exe 所在目录（否则客户端找不到同级依赖会静默退出，也会导致调试开关不监听）
                 WorkingDirectory = Path.GetDirectoryName(exe) ?? "",
                 UseShellExecute = true,
             };
+            if (extraArgs.Length > 0) psi.Arguments = extraArgs;
             Process.Start(psi);
-            return "已启动天学网客户端: " + exe;
+            return "已启动天学网客户端: " + exe + (extraArgs.Length > 0 ? "（带调试参数）" : "");
         }
         catch (Exception e) { return "启动失败: " + e.Message; }
     }
@@ -259,10 +297,45 @@ public static class ClientService
         try
         {
             foreach (var f in Directory.EnumerateFiles(dir, "*.exe", SearchOption.AllDirectories))
-                if (NameKeys.Any(k => Path.GetFileNameWithoutExtension(f).Contains(k, StringComparison.OrdinalIgnoreCase)))
-                    return f;
+            {
+                var fn = Path.GetFileNameWithoutExtension(f);
+                if (!NameKeys.Any(k => fn.Contains(k, StringComparison.OrdinalIgnoreCase))) continue;
+                if (LooksLikeInstaller(f)) continue; // 排除安装包 / 卸载程序
+                return f;
+            }
         }
         catch { }
         return null;
+    }
+
+    /// <summary>列出 %LOCALAPPDATA%\TxwExtract\installer 这一层目录里、被 <see cref="LooksLikeInstaller"/> 判定为安装包的文件及其大小。</summary>
+    public static List<(string Path, long Size)> InstallerFiles()
+    {
+        var list = new List<(string Path, long Size)>();
+        try
+        {
+            var dir = AppPaths.InstallerDir;
+            if (!Directory.Exists(dir)) return list;
+            foreach (var f in Directory.EnumerateFiles(dir)) // 只扫这一层，绝不递归
+            {
+                if (!f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!LooksLikeInstaller(f)) continue;
+                try { var fi = new FileInfo(f); list.Add((f, fi.Length)); } catch { }
+            }
+        }
+        catch { }
+        return list;
+    }
+
+    /// <summary>删除 <see cref="InstallerFiles"/> 列出的文件（只删 installer 这一层、且通过判定者；删不掉的跳过不抛）。</summary>
+    public static (int Count, long Bytes) ClearInstallers()
+    {
+        int count = 0; long bytes = 0;
+        foreach (var (p, size) in InstallerFiles())
+        {
+            try { File.Delete(p); count++; bytes += size; }
+            catch { } // 被占用等：跳过，不阻断
+        }
+        return (count, bytes);
     }
 }

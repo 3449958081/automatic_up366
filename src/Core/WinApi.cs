@@ -27,6 +27,10 @@ public static class WinApi
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
+    /// <summary>GetSystemMetrics 包装（SM_CXSCREEN=0 / SM_CYSCREEN=1），用于 DPI 口径诊断。</summary>
+    [DllImport("user32.dll", EntryPoint = "GetSystemMetrics")]
+    public static extern int GetSystemMetricsWrapper(int nIndex);
+
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hDC, uint nFlags);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);

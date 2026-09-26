@@ -20,12 +20,22 @@ public sealed class AutoEngine : IDisposable
     private List<string>? _lastLines;
 
     // v1.0.6 选中态以像素为准（用户指定方案）：选项框变蓝 = 已选中，文字不变。
-    // 点击是否生效不靠"点过记录"猜 —— 未选中（含上次点击失败）自动重试，单选项上限 3 次。
+    // 点击是否生效不靠"点过记录"猜 —— 未选中（含上次点击失败）自动重试。
+    // v1.0.19：上限 3→8 次。用户实测：天学网有"整页暂时禁止作答"状态（一切点击零反馈，
+    // 过一会自行恢复）——旧上限 3 次（约 7 秒确认窗口）熬不过冻结期就把题永久放弃，
+    // 正是 ~10% 漏答的主因。配合递增冷却（见 AnswerScreenAsync），耐心等页面解冻。
     private readonly Dictionary<string, int> _clickAttempts = new();
     private int _pageGen;             // 页代号：翻页/客户端跳页时 +1（重置重试计数）
     private int _clicksThisPage;      // 本页我方点击次数
     private bool _answeredSeenThisPage; // 本页见过"已选中"选项（含用户手动作答）—— 页面已答完即可推进
     private bool CanAdvanceThisPage => _clicksThisPage > 0 || _answeredSeenThisPage;
+    // v1.0.19：防死循环兜底 —— 记录上次"跳页补答"时的点击数，连续多轮零新点击即判定已无可答内容。
+    private int _clickedAtLastJump;
+    private int _stuckJumpRounds;
+    // v1.0.20：停摆静默 —— 兜底要判"完成"前核实屏上仍有未选中选项（题库没配上的漏答题，
+    // 用户实测：听力页第5题未答却被判"完成✅"终止）。此时不宣布完成、不再反复补答空转，
+    // 只安静轮询常规匹配；一旦点中任何选项即恢复。
+    private bool _stalledQuiet;
 
     /// <summary>页面连续无变化多少轮后，再次检测到变化即视为"客户端自行跳页"，触发整页补答。</summary>
     private const int StaleJumpThreshold = 2;
@@ -33,6 +43,8 @@ public sealed class AutoEngine : IDisposable
     private const int MaxClicksPerScreen = 15;
     /// <summary>整页补答最多翻页次数（防任何意外情况下的无限翻页）。</summary>
     private const int MaxPageTurns = 30;
+    /// <summary>单选项点击未确认选中的重试上限（v1.0.19：3→8，配合递增冷却熬过整页冻结期）。</summary>
+    private const int MaxClickAttempts = 8;
 
     public bool Running => _cts != null && !_cts.IsCancellationRequested;
     public int Round { get; private set; }
@@ -62,6 +74,7 @@ public sealed class AutoEngine : IDisposable
         // 记录会带进新会话，重启后同样选项直接被"放弃"跳过（实锤 bug）。
         _clickAttempts.Clear();
         _pageGen = 0; _clicksThisPage = 0; _answeredSeenThisPage = false;
+        _clickedAtLastJump = 0; _stuckJumpRounds = 0; _stalledQuiet = false;
         StartedAt = DateTime.Now;
 
         WinApi.Activate(hwnd);
@@ -129,9 +142,9 @@ public sealed class AutoEngine : IDisposable
         if (lines.Count == 0) { Emit("本轮未识别到文字"); return RoundOutcome.Ok; }
 
         // 1) 终止标志：成绩/得分/正确率 + 数字，或提交/完成类关键词
-        if (IsEndPage(lines))
+        if (IsEndPage(lines, out var endSig))
         {
-            Emit("检测到成绩/得分页 —— 自动回答完成 ✅");
+            Emit($"检测到成绩/得分页（签名“{Trunc(endSig, 24)}”）—— 自动回答完成 ✅");
             return RoundOutcome.End;
         }
 
@@ -144,8 +157,27 @@ public sealed class AutoEngine : IDisposable
             if (UnchangedRounds % 5 == 1)
                 Emit($"页面稳定（相似度 {sim:F2}），仅轮询等待变化…（累计 {UnchangedRounds} 轮无变化）");
             // v1.0.7：本页已答完（同上）且连续稳定数轮 —— 推进（翻页/提交）
+            // v1.0.20：停摆静默期间不补答不推进（避免空转刷屏/误交白卷），但每 5 轮核实一次
+            // 屏上未选中选项 —— 若已被解决（用户手动作答/题库更新命中），解除静默恢复正常推进。
             if (CanAdvanceThisPage && UnchangedRounds >= StaleJumpThreshold)
             {
+                if (_stalledQuiet)
+                {
+                    if (UnchangedRounds % 5 == 1)
+                    {
+                        if (!await HasUnansweredOptionOnScreenAsync(hwnd))
+                        {
+                            _stalledQuiet = false;
+                            Emit("屏上未选中选项已清零 —— 解除静默，恢复正常推进");
+                        }
+                        else
+                        {
+                            Emit("静默等待中：屏上仍有未选中选项（不推进不提交；等音频播完自动翻页/题库更新/手动作答）");
+                            return RoundOutcome.Ok;
+                        }
+                    }
+                    else return RoundOutcome.Ok;
+                }
                 bool ended = await SweepDrainAsync(hwnd, label, minConf, token, "本页已作答且稳定 —— 推进（翻页/提交）");
                 _lastLines = null;   // SweepDrain 后页面已变，下轮重建基线
                 return ended ? RoundOutcome.End : RoundOutcome.Ok;
@@ -162,9 +194,42 @@ public sealed class AutoEngine : IDisposable
         //      新页面可能因篇幅限制/题型特色（翻页式）无法一屏答完 —— 进入整页补答。
         if (jumpAfterStale)
         {
-            _pageGen++; _clicksThisPage = 0; _answeredSeenThisPage = false;   // 客户端自行跳页：新页代号，允许新页同文本选项
-            bool ended = await SweepDrainAsync(hwnd, label, minConf, token, "进入整页补答（页面稳定后突变）");
-            return ended ? RoundOutcome.End : RoundOutcome.Ok;
+            if (_stalledQuiet)
+            {
+                // v1.0.20：停摆期间页面又变化 —— 当作新页走常规匹配（步骤3），不再补答空转。
+                // 若这一屏能点中任何选项，步骤3 会清除停摆标志。
+                _pageGen++; _clicksThisPage = 0; _answeredSeenThisPage = false;
+            }
+            else
+            {
+                // v1.0.19 防死循环兜底：结果页的 OCR 噪声（版本号等残字每轮识别略有差异）会让页面在
+                // "稳定↔变化"间反复横跳，每次都触发跳页补答。正常答题时每次真跳页都会伴随新点击，
+                // 若连续多轮跳页补答期间零新点击 —— 判定实际已无可答内容，视为完成（防无限空转）。
+                if (Clicked == _clickedAtLastJump) _stuckJumpRounds++; else _stuckJumpRounds = 0;
+                _clickedAtLastJump = Clicked;
+                if (_stuckJumpRounds >= 3)
+                {
+                    // v1.0.20：宣布"完成"前必须核实 —— 屏上仍有未选中的 A-D 选项行 = 还有漏答题
+                    // （题库没匹配上，不是答完了）。用户实测：听力页第 5 题三选项全空，却被判
+                    // "自动回答完成 ✅" 终止。此时改为进入停摆静默：不再反复补答空转，
+                    // 安静轮询（等解冻/等题库增长后可能重新命中），由用户决定何时停止。
+                    if (await HasUnansweredOptionOnScreenAsync(hwnd))
+                    {
+                        _stuckJumpRounds = 0;
+                        if (!_stalledQuiet)
+                        {
+                            _stalledQuiet = true;
+                            Emit("⚠ 已连续多轮补答零点击，但屏上仍有未选中选项（题库未命中该题）—— 不判定完成，转入静默等待（可自行停止或补充题库后继续）");
+                        }
+                        return RoundOutcome.Ok;
+                    }
+                    Emit($"连续 {_stuckJumpRounds} 轮跳页补答均无任何新点击，且屏上已无未选中选项 —— 判定已无可作答内容，自动回答完成 ✅");
+                    return RoundOutcome.End;
+                }
+                _pageGen++; _clicksThisPage = 0; _answeredSeenThisPage = false;   // 客户端自行跳页：新页代号，允许新页同文本选项
+                bool ended = await SweepDrainAsync(hwnd, label, minConf, token, "进入整页补答（页面稳定后突变）");
+                return ended ? RoundOutcome.End : RoundOutcome.Ok;
+            }
         }
 
         // 3) 匹配 + 点击
@@ -181,7 +246,7 @@ public sealed class AutoEngine : IDisposable
         if (hit != null)
         {
             aKey = _pageGen + "|" + Norm(hit.Line.Text);
-            if (_clickAttempts.TryGetValue(aKey, out var att) && att >= 3)
+            if (_clickAttempts.TryGetValue(aKey, out var att) && att >= MaxClickAttempts)
             {
                 skip = $"“{Trunc(hit.Line.Text, 40)}” 连续 {att} 次点击未选中 —— 放弃（防死循环）";
                 hit = null; aKey = null;
@@ -195,24 +260,29 @@ public sealed class AutoEngine : IDisposable
             // 旧条件 _clicksThisPage>0 误伤"启动时题目已全部答完"的场景：工具一题未点 →
             // 安全阀拒绝推进 → 永远走不到提交（用户实测 v1.0.6"提交按不中"的真正原因）。
             // 题库完全失配的页面两者皆否 → 仍不推进，防跳过未答题。
-            if (CanAdvanceThisPage)
+            // v1.0.20：停摆静默期间不补答、不提交（屏上明明有未答选项，提交=漏答交白卷），
+            // 只安静轮询；点中任何选项后标志清除、恢复正常推进。
+            if (!_stalledQuiet)
             {
-                bool ended = await SweepDrainAsync(hwnd, label, minConf, token, "本页作答完毕 —— 推进（翻页/提交）");
-                return ended ? RoundOutcome.End : RoundOutcome.Ok;
-            }
-            // v2.1.24：无可点项时兜底检测"提交"——但仅在**没有"下一页"**时（提交与下一页互斥，
-            // 有下一页=还有题要答，不能提前提交；无下一页=最后一页才点提交）
-            if (!lines.Any(IsNextPageLine))
-            {
-                var sub = lines.FirstOrDefault(IsSubmitLine);
-                if (sub != null)
+                if (CanAdvanceThisPage)
                 {
-                    // v1.0.10：定位到"提交"二字本身（聚合行中心会落在页码附近）
-                    if (!LocateSubText(sub, "提交", out int sx, out int sy))
-                    { sx = sub.X + sub.W / 2; sy = sub.Y + sub.H / 2; }
-                    bool sent = WinApi.ClickWindow(hwnd, sx, sy);
-                    Emit($"检测到“提交”按钮 —— 点击 @(窗口内 {sx},{sy})" + (sent ? "" : "（投递失败）"));
-                    await Task.Delay(900, token);   // 等提交/成绩渲染，下一轮主循环检测成绩页
+                    bool ended = await SweepDrainAsync(hwnd, label, minConf, token, "本页作答完毕 —— 推进（翻页/提交）");
+                    return ended ? RoundOutcome.End : RoundOutcome.Ok;
+                }
+                // v2.1.24：无可点项时兜底检测"提交"——但仅在**没有"下一页"**时（提交与下一页互斥，
+                // 有下一页=还有题要答，不能提前提交；无下一页=最后一页才点提交）
+                if (!lines.Any(IsNextPageLine))
+                {
+                    var sub = lines.FirstOrDefault(IsSubmitLine);
+                    if (sub != null)
+                    {
+                        // v1.0.10：定位到"提交"二字本身（聚合行中心会落在页码附近）
+                        if (!LocateSubText(sub, "提交", out int sx, out int sy))
+                        { sx = sub.X + sub.W / 2; sy = sub.Y + sub.H / 2; }
+                        bool sent = WinApi.ClickWindow(hwnd, sx, sy);
+                        Emit($"检测到“提交”按钮 —— 点击 @(窗口内 {sx},{sy})" + (sent ? "" : "（投递失败）"));
+                        await Task.Delay(900, token);   // 等提交/成绩渲染，下一轮主循环检测成绩页
+                    }
                 }
             }
             return RoundOutcome.Ok;
@@ -226,6 +296,8 @@ public sealed class AutoEngine : IDisposable
         {
             _clickAttempts[aKey!] = (_clickAttempts.TryGetValue(aKey!, out var n2) ? n2 : 0) + 1;
             _clicksThisPage++;
+            // v1.0.20：能点中 = 停摆结束（题库又命中了），恢复正常推进。
+            _stalledQuiet = false;
         }
         Emit($"第 {Round} 轮: 点击 “{Trunc(hit.Line.Text, 40)}” @(窗口内 {cx},{cy}) 来源={hit.Via} 置信度={hit.Conf}" + (ok ? "" : " 点击失败"));
         if (!ok) return RoundOutcome.Ok;
@@ -238,11 +310,37 @@ public sealed class AutoEngine : IDisposable
         return advEnd ? RoundOutcome.End : RoundOutcome.Ok;
     }
 
-    /// <summary>成绩/得分/提交完成类页面判定（常规轮询与整页补答共用）。</summary>
-    private static bool IsEndPage(List<OcrLine> lines)
+    /// <summary>成绩/得分/提交完成类页面判定（常规轮询与整页补答共用）。
+    /// v1.0.19：补齐天学网「作答结果回顾页」的签名词——实测提交后页面显示的是
+    /// 「失分分析 / 已生成个性化同类题练习 / 快去完成吧 / 考点：… / 语音·词汇分析」，
+    /// 旧表只认「得分/成绩/正确率+数字、提交成功、已交卷」，导致结果页判不出结束而死循环。</summary>
+    private static bool IsEndPage(List<OcrLine> lines, out string matched)
     {
         string joined = string.Join(" ", lines.Select(l => l.Text));
-        return Regex.IsMatch(joined, @"(得分|成绩|正确率)\s*[:：]?\s*[0-9０-９]|(提交成功|练习完成|试卷完成|作答完成|已交卷|本卷完成|重新测试|查看回顾|finished|submitted|completed)", RegexOptions.IgnoreCase);
+        var m = Regex.Match(joined,
+            @"(得分|成绩|正确率)\s*[:：]?\s*[0-9０-９]" +
+            @"|(提交成功|练习完成|试卷完成|作答完成|已交卷|本卷完成|重新测试|查看回顾|finished|submitted|completed)" +
+            @"|(失分分析|考点分析|词汇分析|语音分析|同类题练习|已生成个性化|快去完成吧|生成.{0,8}练习|本次.{0,4}[0-9１-９]+\s*错)",
+            RegexOptions.IgnoreCase);
+        matched = m.Success ? m.Value : "";
+        return m.Success;
+    }
+    private static bool IsEndPage(List<OcrLine> lines) => IsEndPage(lines, out _);
+
+    /// <summary>屏上是否仍有"未选中的 A-D 选项行"（v1.0.20）：兜底宣布"完成"前的核实 ——
+    /// 听力页还在放指令/题库没命中时，屏上明明有没点的选项，绝不能判"完成"终止。
+    /// 只认 A./B./C./D. 前缀行（题干样行不算），且像素检测未选中。</summary>
+    private static async Task<bool> HasUnansweredOptionOnScreenAsync(IntPtr hwnd)
+    {
+        try
+        {
+            using var bmp = WinApi.CaptureWindow(hwnd, out _);
+            if (bmp == null) return false;
+            var lines = await OcrService.RecognizeAsync(bmp);
+            return lines.Any(l =>
+                Regex.IsMatch(l.Text.Trim(), @"^[A-Da-d][.、)：:]\s*\S") && !IsOptionSelected(bmp, l));
+        }
+        catch { return false; }
     }
 
     /// <summary>OCR 行是否为"下一页"按钮（翻页题型标志）；去空格以容忍 OCR 断字。</summary>
@@ -574,10 +672,10 @@ public sealed class AutoEngine : IDisposable
             var hit = Matcher.DecideClick(unsel, BankService.AnswerTexts(), minConf);
             if (hit == null) return true;   // 无可点项（全部已选中 / 题库无匹配）
             string aKey = _pageGen + "|" + Norm(hit.Line.Text);
-            if (_clickAttempts.TryGetValue(aKey, out var att) && att >= 3)
+            if (_clickAttempts.TryGetValue(aKey, out var att) && att >= MaxClickAttempts)
             {
                 Emit($"“{Trunc(hit.Line.Text, 40)}” 连续 {att} 次点击未选中 —— 放弃该选项（防死循环）");
-                return true;   // 放弃：放行后续下滑（已尽 3 次确认义务）
+                return true;   // 放弃：放行后续下滑（已尽确认义务）
             }
             int cx = hit.Line.X + hit.Line.W / 2, cy = hit.Line.Y + hit.Line.H / 2;
             bool ok = WinApi.ClickWindow(hwnd, cx, cy);
@@ -594,7 +692,11 @@ public sealed class AutoEngine : IDisposable
             bool confirmed = await ConfirmSelectedAsync(hwnd, hit.Line.Text, hit.Line.Y, token);
             if (!confirmed)
             {
-                Emit($"“{Trunc(hit.Line.Text, 40)}” 点击后未确认选中 —— 不执行下滑");
+                // v1.0.19：用户实测"禁止作答"= 整页暂时冻结（一切点击零反馈，过一会自行恢复）。
+                // 冻结期快速重试只会白白烧掉尝试次数，递增冷却（2s 起步、封顶 15s）耐心等解冻。
+                int cool = Math.Min(15000, 2000 * (att + 1));
+                Emit($"“{Trunc(hit.Line.Text, 40)}” 点击后未确认选中（第 {att + 1}/{MaxClickAttempts} 次）—— 不执行下滑，冷却 {cool / 1000}s 等页面解冻");
+                try { await Task.Delay(cool, token); } catch { }
                 return false;
             }
             Emit($"“{Trunc(hit.Line.Text, 40)}” 已确认选中 ✓");

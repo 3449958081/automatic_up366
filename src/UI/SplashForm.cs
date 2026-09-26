@@ -1,20 +1,27 @@
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
+using TxwExtract.Core;
 
 namespace TxwExtract.UI;
 
 /// <summary>
 /// 开屏动画（单层自绘表面，独立 STA 线程运行，见 Program.Main）：
-/// 纯白起幕 → 商标回弹跳出并居中（白对勾渐进描画 + 落定涟漪）→ 呼吸停留（三点律动）
-/// → 沿贝塞尔弧线飞向左上角（webui header 中 logo 的落点，含残影与轻微倾斜）→ 落定涟漪、背景渐变为品牌底色，
-/// 待页面首帧确认后整体淡出——落点与 webui logo 完全重合，淡出即"无缝交接"。
+/// 纯白起幕 → 商标回弹跳出并居中（白对勾渐进描画 + 落定涟漪）→【居中等待：加载期，三点律动】
+/// → 沿贝塞尔弧线飞向左上角（webui header 中 logo 的落点，含残影与轻微倾斜）→ 落定涟漪、背景渐变为品牌底色
+/// → 落定后商标右侧三点脉冲（等待页面加载的加载指示）→ 由 Program 在最短展示时长后撤下——落点与 webui logo 完全重合，淡出即"无缝交接"。
+///
+/// 时间轴说明（v1.0.15 曾改为"事件驱动"，实测观感不理想，已回退为此固定定时版）：
+///   飞行在固定时刻（1480ms）触发，与页面加载进度无关；Program 在页面真实绘制后（onReady）
+///   再额外等满最短展示时长（≈2700ms）才撤下遮罩。这是有意设计：商标从中央飞到左上角是纯装饰动效，
+///   不应被页面加载阻塞；若页面就绪晚于此时长，则按实际就绪时间撤下（商标已停在 webui logo 位置，淡出即无缝交接）。
+///
 /// 设计要点（踩过的坑）：
 /// 1. 尺寸与主窗体一致并四周各多留 4px，完整覆盖主窗体（含边框/阴影边缘）；
 /// 2. 必须 TopMost —— 主窗体（含 WebView2 Chromium 子窗口）创建后会成为活动窗口；
 /// 3. 必须运行在独立 STA 线程，WebView2 初始化阻塞主 UI 线程时动画也不冻结；
 /// 4. 商标为纯图形（渐变圆角方块 + 白对勾，与 app.ico / webui header 一致），全程不出现文字；
 /// 5. 飞行落点由 MainForm.ClientScreenRect（客户区屏幕矩形）换算，自动适配 DPI 与窗口实际位置；
-/// 6. 撤下时机：MainForm 用 CapturePreview 轮询确认页面已真实绘制后，由 Program 调 FadeOut 淡出。
+/// 6. 撤下时机：由 Program 在最短展示时长后调用 <see cref="FadeOut"/>，本窗体交叉淡出后关闭。
 /// </summary>
 public sealed class SplashForm : Form
 {
@@ -24,15 +31,18 @@ public sealed class SplashForm : Form
     private bool _flyInit;
     private PointF _flyStart, _flyCtrl, _flyEnd;
 
-    // ---- 编排时间轴（ms）----
+    // ---- 编排时间轴（ms，固定定时）----
     private const int TBounce0 = 160;   // 纯白静默结束，商标开始跳出
     private const int TBounce1 = 840;   // 跳出完成（回弹 + 对勾描画 + 涟漪）
-    private const int TFly0 = 1480;     // 居中停留结束，起飞
-    private const int TFly1 = 2160;     // 抵达左上角
-    private const int TLand0 = 2160;    // 落定：涟漪 + 背景白→品牌底色
+    private const int TFly0    = 1480;  // 飞行起点（固定时刻，与页面加载无关）
+    private const int TFly1    = 2160;  // 飞行终点（飞行时长 680ms，与跳出 1.48s 衔接）
+    private const int TLandDur = 400;   // 落定背景 白→品牌底色 的过渡时长
 
     // 品牌色（与前端 CSS 变量一致；Cbg 对应 --bg，落定背景须与 webui 同色才能无缝淡出）
-    private static readonly Color Cbg = Color.FromArgb(0xf0, 0xf3, 0xf9);
+    private static readonly Color Cbg = Color.FromArgb(0xf5, 0xf5, 0xf7);   // = webui --bg（Apple #F5F5F7），落定后须同色才能无缝淡出
+    // 商标配色 = 旧版 v1.3.x 品牌蓝（用户 2026-09-19「图标不回退，但颜色按旧版来」）。
+    // 必须与 webui 的 .logo 渐变同色同向（45° = CSS 135deg），否则飞落时会有可见色跳。
+    // 对勾尺寸口径 = webui .logo svg(100%) = _make_icon.py CHECK_SCALE(1.0) = 占商标宽 62.5%。
     private static readonly Color Cblue = Color.FromArgb(0x3a, 0x63, 0xf3);
     private static readonly Color Cblue2 = Color.FromArgb(0x6b, 0x8b, 0xff);
 
@@ -66,9 +76,11 @@ public sealed class SplashForm : Form
 
     private void OnTick(object? sender, EventArgs e)
     {
+        double ms = (DateTime.Now - _t0).TotalMilliseconds;
+
+        // 交叉淡出：由 Program 在最短展示时长后调用 FadeOut 触发（不在此自行决定撤下时机）
         if (_fadingOut)
         {
-            // 交叉淡出：线性降到 0 后关闭
             Opacity -= 0.07;
             if (Opacity <= 0) { try { _timer.Stop(); Close(); } catch { } return; }
         }
@@ -79,7 +91,7 @@ public sealed class SplashForm : Form
         Invalidate();   // 全程整面重绘（双缓冲，30ms 一次开销可控）
     }
 
-    /// <summary>交叉淡出并关闭（由 Program 在页面真实绘制完成后调用）。</summary>
+    /// <summary>交叉淡出并关闭（由 Program 在最短展示时长后调用）。</summary>
     public void FadeOut()
     {
         if (_fadingOut) return;
@@ -93,17 +105,18 @@ public sealed class SplashForm : Form
         double ms = (DateTime.Now - _t0).TotalMilliseconds;
         float k = DeviceDpi / 96f;      // DPI 缩放系数（本窗体与主窗体同进程同屏，比例一致）
 
-        // ---- 背景：纯白 →（落定时 400ms 内）→ 品牌底色，淡出时与 webui 同底色无缝衔接 ----
-        g.Clear(LerpColor(Color.White, Cbg, EaseInOutCubic(Clamp01((ms - TLand0) / 400.0))));
+        // ---- 时间轴：飞行在固定时刻 TFly0 触发 ----
+        if (ms >= TFly0 && !_flyInit) InitFly(new PointF(ClientSize.Width / 2, ClientSize.Height / 2));
+        double landMs = TFly1;
+
+        // ---- 背景：纯白 →（落定时 TLandDur 内）→ 品牌底色，淡出时与 webui 同底色无缝衔接 ----
+        g.Clear(LerpColor(Color.White, Cbg, EaseInOutCubic(Clamp01((ms - landMs) / TLandDur))));
 
         int cx = ClientSize.Width / 2, cy = ClientSize.Height / 2;
         float sMax = 84f * k;           // 居中阶段商标边长（≈ webui 的 2.6 倍，视觉主角）
         float sEnd = 32f * k;           // webui header 中 logo 的 CSS 尺寸 32px
 
-        // 起飞前一刻计算飞行轨迹（落点需主窗体已就位）
-        if (ms >= TFly0 && !_flyInit) InitFly(new PointF(cx, cy));
-
-        // ---- 商标状态机：跳出 → 停留 → 飞行 → 落定 ----
+        // ---- 商标状态机：跳出 → 居中等待（加载）→ 飞行 → 落定 ----
         PointF logoC = default;
         float logoS = 0, rot = 0;
         int alpha = 0;
@@ -111,24 +124,16 @@ public sealed class SplashForm : Form
 
         if (ms < TBounce1)
         {
-            // 跳出：easeOutBack 回弹缩放 + 对勾渐进描画
+            // ① 跳出：easeOutBack 回弹缩放 + 对勾渐进描画
             double p = Clamp01((ms - TBounce0) / (TBounce1 - TBounce0));
             logoS = sMax * (float)Math.Max(0, EaseOutBack(p));
             logoC = new PointF(cx, cy);
             alpha = Clamp255((ms - TBounce0) / 200.0);
             checkP = EaseOutCubic(Clamp01((ms - TBounce0 - 240) / 420.0));
         }
-        else if (ms < TFly0)
+        else if (_flyInit && ms < TFly1)
         {
-            // 居中停留：轻微呼吸
-            double breathe = 1 + 0.018 * Math.Sin((ms - TBounce1) * 2 * Math.PI / 1400);
-            logoS = sMax * (float)breathe;
-            logoC = new PointF(cx, cy);
-            alpha = 255;
-        }
-        else if (ms < TFly1)
-        {
-            // 飞行：贝塞尔弧线 + 缩小 + 轻微倾斜 + 彗星尾
+            // ③ 飞行：贝塞尔弧线 + 缩小 + 轻微倾斜 + 彗星尾
             double p = Clamp01((ms - TFly0) / (TFly1 - TFly0));
             double eFly = EaseInOutCubic(p);
             logoC = Bezier(_flyStart, _flyCtrl, _flyEnd, eFly);
@@ -151,10 +156,19 @@ public sealed class SplashForm : Form
                 DrawLogo(g, gc, logoS, ga, gr, 1, sEnd);
             }
         }
-        else
+        else if (_flyInit)
         {
+            // ④ 已落定
             logoC = _flyEnd;
             logoS = sEnd;
+            alpha = 255;
+        }
+        else
+        {
+            // ② 居中等待 = 加载期：轻微呼吸
+            double breathe = 1 + 0.018 * Math.Sin((ms - TBounce1) * 2 * Math.PI / 1400);
+            logoS = sMax * (float)breathe;
+            logoC = new PointF(cx, cy);
             alpha = 255;
         }
 
@@ -162,37 +176,34 @@ public sealed class SplashForm : Form
 
         // ---- 落定涟漪（居中跳出结束时一次、抵达左上角时一次）----
         Ripple(g, new PointF(cx, cy), TBounce1, ms, sMax / 2);
-        if (_flyInit) Ripple(g, _flyEnd, TLand0, ms, sEnd / 2);
+        if (_flyInit) Ripple(g, _flyEnd, landMs, ms, sEnd / 2);
 
-        // ---- 停留期：商标下方三点律动（起飞时快速淡出）----
-        if (ms >= TBounce1 && ms < TFly1)
+        // ---- 居中等待期：商标下方三点律动（加载指示）----
+        if (ms >= TBounce1 && !_flyInit)
         {
-            int dA = ms < TFly0 ? 255 : Math.Max(0, (int)(255 * (1 - (ms - TFly0) / 160.0)));
-            if (dA > 0)
-            {
-                float dy = cy + sMax / 2 + 34 * k;
-                for (int i = 0; i < 3; i++)
-                {
-                    double u = (ms / 520.0 + i * 0.16) % 1.0;
-                    float lift = (float)Math.Abs(Math.Sin(u * Math.PI)) * 8 * k;
-                    int a2 = Math.Min(255, (int)(dA * (0.45 + 0.55 * Math.Abs(Math.Sin(u * Math.PI)))));
-                    using var b = new SolidBrush(Color.FromArgb(a2, Cblue));
-                    g.FillEllipse(b, cx - 24 * k + i * 18 * k - 3.5f * k, dy - lift - 3.5f * k, 7 * k, 7 * k);
-                }
-            }
-        }
-
-        // ---- 落定后：商标右侧三点脉冲（加载中暗示，淡出交接前保持）----
-        if (_flyInit && ms >= TLand0)
-        {
-            int pA = Math.Min(255, (int)(255 * (ms - TLand0) / 300.0));
-            float dx0 = _flyEnd.X + sEnd / 2 + 16 * k;
+            float dy = cy + sMax / 2 + 34 * k;
             for (int i = 0; i < 3; i++)
             {
                 double u = (ms / 520.0 + i * 0.16) % 1.0;
-                int a2 = Math.Min(255, (int)(pA * (0.35 + 0.65 * Math.Abs(Math.Sin(u * Math.PI)))));
-                using var b = new SolidBrush(Color.FromArgb(a2, Cblue));
-                g.FillEllipse(b, dx0 + i * 10 * k - 3 * k, _flyEnd.Y - 3 * k, 6 * k, 6 * k);
+                float lift = (float)Math.Abs(Math.Sin(u * Math.PI)) * 8 * k;
+                int a2 = (int)(255 * (0.45 + 0.55 * Math.Abs(Math.Sin(u * Math.PI))));
+                using var b = new SolidBrush(Color.FromArgb(a2, Cblue2));
+                g.FillEllipse(b, cx - 24 * k + i * 18 * k - 3.5f * k, dy - lift - 3.5f * k, 7 * k, 7 * k);
+            }
+        }
+
+        // ---- 落定后：商标右侧三点脉冲（等待页面加载的加载指示，原版行为）----
+        if (_flyInit && ms >= TFly1)
+        {
+            float dx = _flyEnd.X + sEnd / 2 + 16 * k;
+            float dy = _flyEnd.Y;
+            for (int i = 0; i < 3; i++)
+            {
+                double u = (ms / 520.0 + i * 0.16) % 1.0;
+                int a2 = (int)(200 * Math.Abs(Math.Sin(u * Math.PI)));
+                if (a2 <= 0) continue;
+                using var b = new SolidBrush(Color.FromArgb(a2, Cblue2));
+                g.FillEllipse(b, dx + i * 14 * k - 3.5f * k, dy - 3.5f * k, 7 * k, 7 * k);
             }
         }
     }
@@ -206,7 +217,7 @@ public sealed class SplashForm : Form
         if (Math.Abs(rotDeg) > 0.01f) g.RotateTransform(rotDeg);
 
         var r = new RectangleF(-size / 2, -size / 2, size, size);
-        float rad = size * 9f / 32f;    // webui：32px 圆角 9px，等比放大
+        float rad = size * 7f / 32f;    // Apple 方圆形：webui 32px 圆角 7px（≈size×22%），等比放大
 
         // 居中阶段的柔和投影
         if (size > endSize * 1.15f)
@@ -248,6 +259,7 @@ public sealed class SplashForm : Form
         float dx = _flyEnd.X - _flyStart.X, dy = _flyEnd.Y - _flyStart.Y;
         _flyCtrl = new PointF(_flyStart.X + dx * 0.55f,
                               Math.Min(_flyStart.Y, _flyEnd.Y) - Math.Abs(dy) * 0.18f - 40);
+        State("Splash InitFly at +" + (int)(DateTime.Now - _t0).TotalMilliseconds + "ms");
     }
 
     /// <summary>落点：主窗体客户区左上角 + webui header 内 logo 中心偏移（CSS：padding 22 + 16，header 高 58 之半）。</summary>
@@ -324,13 +336,8 @@ public sealed class SplashForm : Form
 
     private static void State(string msg)
     {
-        try
-        {
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TxwExtract");
-            Directory.CreateDirectory(dir);
-            File.AppendAllText(Path.Combine(dir, "startup_state.txt"), $"[{DateTime.Now:HH:mm:ss}] {msg}\r\n");
-        }
-        catch { }
+        LogFiles.AppendCapped(Path.Combine(AppPaths.DataDir, "startup_state.txt"), $"[{DateTime.Now:HH:mm:ss}] {msg}\r\n");
+        LogFiles.Session("boot | " + msg);
     }
 
     protected override void Dispose(bool disposing)

@@ -151,7 +151,12 @@ public static class ScanService
                             o.TryGetProperty("question_id", out _))
                         {
                             q++;
-                            if (o.TryGetProperty("qtype_id", out var t) && t.GetInt32() == 108) choice++;
+                            // 选择题判定与下方 ParseFlipQuestion 保持一致：108 与 109 都是选择题
+                            // （109 的选项常嵌在 questions_list 里，本级 options 可能为空），旧版只认 108 会少统计
+                            bool isCh = false;
+                            if (o.TryGetProperty("qtype_id", out var t) && (t.GetInt32() == 108 || t.GetInt32() == 109)) isCh = true;
+                            else if (o.TryGetProperty("options", out var op) && op.ValueKind == JsonValueKind.Array && op.GetArrayLength() > 0) isCh = true;
+                            if (isCh) choice++;
                         }
                     }
                     catch { }
@@ -213,11 +218,20 @@ public static class ScanService
     }
 
     // ---------- resources（paper.xml + correctAnswer.xml） ----------
+    /// <summary>
+    /// 取字段的 CDATA 内容。**一个字段可能含多段 CDATA**（读后续写：<c>&lt;answers&gt;</c> 下有多个
+    /// <c>&lt;answer&gt;&lt;![CDATA[一段范文]]&gt;&lt;/answer&gt;</c>），必须全部取出。
+    /// v1.6.6 修复：原实现用 <c>Regex.Match</c> 只取**第一个** CDATA，导致第 2 段及以后被静默丢弃
+    /// （实测课程 2102024302596456459「读后续写」2 段范文只出 1 段）。
+    /// 单段时返回值与原来完全一致。
+    /// </summary>
     static string FieldInner(string inner)
     {
         if (string.IsNullOrEmpty(inner)) return "";
-        var m = Regex.Match(inner, @"<!\[CDATA\[([\s\S]*?)\]\]>");
-        return m.Success ? m.Groups[1].Value : inner;
+        var ms = Regex.Matches(inner, @"<!\[CDATA\[([\s\S]*?)\]\]>");
+        if (ms.Count == 0) return inner;
+        if (ms.Count == 1) return ms[0].Groups[1].Value;
+        return string.Join("\n", ms.Cast<Match>().Select(m => m.Groups[1].Value));
     }
 
     static string StripTags(string s) =>
@@ -254,8 +268,21 @@ public static class ScanService
                 string no = Regex.Match(e, "<question_no>([\\s\\S]*?)</question_no>").Groups[1].Value;
                 string qt = StripTags(FieldInner(Regex.Match(e, "<question_text>([\\s\\S]*?)</question_text>").Groups[1].Value));
                 var opts = new List<(string, string)>();
-                foreach (Match om in Regex.Matches(e, "<option\\s+id=\"([^\"]+)\">([\\s\\S]*?)</option>"))
-                    opts.Add((om.Groups[1].Value, StripTags(FieldInner(om.Groups[2].Value))));
+                // option 的文本有两种存放形态：
+                //   ① 放在元素内容里：<option id="1">A. xxx</option>
+                //   ② 放在 direction 属性里：<option id="1" direction="续写开头语"><![CDATA[]]></option>
+                //      （读后续写 question_type=18 / question_kind=2 用这种）
+                // v1.6.6 修复：原正则要求 id="..." 后**紧跟 >**，形态②（中间还有别的属性）整条漏掉
+                // → 读后续写的 2 条开头语全部丢失、Options 为空。属性段现按"引号内不截断"匹配。
+                foreach (Match om in Regex.Matches(e, "<option\\b((?:[^>\"']|\"[^\"]*\"|'[^']*')*)>([\\s\\S]*?)</option>"))
+                {
+                    string attrs = om.Groups[1].Value;
+                    string oid = Regex.Match(attrs, @"\bid=""([^""]*)""").Groups[1].Value;
+                    string text = StripTags(FieldInner(om.Groups[2].Value));
+                    if (text.Length == 0)   // 形态②：内容为空，真正文本在 direction 属性
+                        text = StripTags(Regex.Match(attrs, @"\bdirection=""([^""]*)""").Groups[1].Value);
+                    if (text.Length > 0) opts.Add((oid, text));
+                }
                 string rid = Regex.Match(e, "<ref_question_id>([^<]+)</ref_question_id>").Groups[1].Value;
                 paper.Questions.Add((id, no, qt, opts, rid));
             }
@@ -443,7 +470,8 @@ public static class ScanService
                         if (!q.TryGetProperty("question_id", out var qidEl)) continue;
                         string qid = qidEl.GetString() ?? "";
                         bool hasOpts = q.TryGetProperty("options", out var oEl) && oEl.ValueKind == JsonValueKind.Array && oEl.GetArrayLength() > 0;
-                        bool isChoice = q.TryGetProperty("qtype_id", out var tEl) && tEl.GetInt32() == 108;
+                        bool isChoice = q.TryGetProperty("qtype_id", out var tEl) &&
+                                        (tEl.GetInt32() == 108 || tEl.GetInt32() == 109);
                         if (hasOpts || isChoice) { Push(src, ParseFlipQuestion(q)); continue; }
                         if (!byQid.TryGetValue(qid, out var qo)) { missingCount++; continue; }
                         if (qo.TryGetProperty("questions_list", out var sub) && sub.ValueKind == JsonValueKind.Array)

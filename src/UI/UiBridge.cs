@@ -15,7 +15,7 @@ public sealed class UiBridge
 {
     private readonly AppConfig _cfg;
     private readonly AutoService _auto = new();
-    private readonly MitmProxy _mitm = new();
+
     /// <summary>在 UI 线程执行动作（MainForm 注入 BeginInvoke）。</summary>
     public Action<Action>? RunOnUi { get; set; }
     private static readonly JsonSerializerOptions JOpts = new() { PropertyNamingPolicy = null };
@@ -23,26 +23,41 @@ public sealed class UiBridge
     /// <summary>异步任务完成时通知前端（MainForm 注入：执行 toast）。</summary>
     public Action<string>? Notify { get; set; }
 
+    /// <summary>报告成功落盘后登记"最近一次导出路径"（MainForm 注入 RecordLastExport），供「打开所在文件夹」使用。</summary>
+    public Action<string>? RecordExport { get; set; }
+
     /// <summary>弹窗宿主窗口（MainForm 注入），保证目录选择框/确认框显示在最前，不被 WebView2 遮挡。</summary>
     public IWin32Window? Owner { get; set; }
 
     public UiBridge(AppConfig cfg)
     {
         _cfg = cfg;
+        // 任务三：启动回读持久化的抓包答案缓存，并入内存题库（后续 Build 重建会自动重放，用户不删就不丢）
+        try
+        {
+            var pairs = _mc.LoadPersistedPairs();
+            if (pairs.Count > 0) BankService.MergeExternal(pairs);
+        }
+        catch { }
+
+        // ① 进程退出兜底：无论正常退出 / Environment.Exit / 主线程结束，都确保 hosts 还原
+        //    （旧缺陷：关窗口只 Dispose WebView2，hosts 劫持残留 → 客户端下载全部 ERR_CONNECTION_REFUSED）
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => { try { _mc.Dispose(); } catch { } };
+        // ② 启动自愈：上次异常退出残留的劫持块（本机 443 无人监听）在此立刻清除，
+        //    用户不必手动点"停止接管"来还原。
+        try { _mc.RecoverStaleMarker(); } catch { }
     }
 
     static string J(object o) => JsonSerializer.Serialize(o);
     static string Err(string msg) => J(new { ok = false, msg });
 
-    /// <summary>桥接方法异常诊断日志（%LOCALAPPDATA%\TxwExtract\bridge.log），便于定位"后端启动失败"类问题。</summary>
+    /// <summary>桥接方法异常诊断日志（%LOCALAPPDATA%\TxwExtract\bridge.log，超 512KB 截尾），便于定位"后端启动失败"类问题。
+    /// 同时写入本次运行的会话日志（logs\session.log，每次启动自动清除），便于单文件排查。</summary>
     static void LogErr(string tag, Exception e)
     {
-        try
-        {
-            File.AppendAllText(Path.Combine(AppPaths.DataDir, "bridge.log"),
-                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {tag}: {e}\r\n");
-        }
-        catch { }
+        LogFiles.AppendCapped(Path.Combine(AppPaths.DataDir, "bridge.log"),
+            $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {tag}: {e}\r\n");
+        LogFiles.Session("err  | " + tag + ": " + e);
     }
 
     // ---------- 目录 ----------
@@ -273,15 +288,118 @@ public sealed class UiBridge
 
     private string? PickDirDialog()
     {
+        // 用 ConfigClientExe（已排除安装包）而不是裸 _cfg.ClientExe：坏值会让默认目录指向 installer 目录
+        var remembered = ClientService.ConfigClientExe(_cfg);
         using var dlg = new FolderBrowserDialog
         {
             Description = "选择天学网客户端所在目录（程序会在其中查找 up366.exe 等，并记住该位置）",
             UseDescriptionForTitle = true,
-            SelectedPath = !string.IsNullOrWhiteSpace(_cfg.ClientExe)
-                ? Path.GetDirectoryName(_cfg.ClientExe)!
+            SelectedPath = !string.IsNullOrWhiteSpace(remembered)
+                ? Path.GetDirectoryName(remembered)!
                 : Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
         };
         return dlg.ShowDialog(Owner) == DialogResult.OK ? dlg.SelectedPath : null;
+    }
+
+    /// <summary>
+    /// （v1.6.6）让用户指定「导出下载」的落盘目录。写入 config.json 的 ExportDir 后立即生效。
+    /// 传空字符串表示恢复默认（Downloads\TxwExtract）。
+    /// </summary>
+    public string PickExportDir()
+    {
+        try
+        {
+            string cur = AppPaths.ResolveExportDir(_cfg);
+            string? dir;
+            if (RunOnUi != null)
+            {
+                var tcs = new TaskCompletionSource<string?>();
+                RunOnUi(() =>
+                {
+                    using var dlg = new FolderBrowserDialog
+                    {
+                        Description = "选择答案导出的保存目录（下载的 JSON / HTML 会固定保存到这里）",
+                        UseDescriptionForTitle = true,
+                        SelectedPath = Directory.Exists(cur) ? cur : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    };
+                    tcs.TrySetResult(dlg.ShowDialog(Owner) == DialogResult.OK ? dlg.SelectedPath : null);
+                });
+                dir = tcs.Task.GetAwaiter().GetResult();
+            }
+            else
+            {
+                using var dlg = new FolderBrowserDialog { SelectedPath = cur };
+                dir = dlg.ShowDialog(Owner) == DialogResult.OK ? dlg.SelectedPath : null;
+            }
+            if (string.IsNullOrWhiteSpace(dir)) return J(new { ok = false, msg = "已取消", dir = cur });
+
+            return SetExportDir(dir);
+        }
+        catch (Exception e) { LogErr("PickExportDir", e); return Err(e.Message); }
+    }
+
+    /// <summary>
+    /// 手动设置导出目录（v1.6.6）：用户在界面上直接输入/粘贴路径，无需弹文件夹选择框。
+    /// 与 PickExportDir 共用 SetExportDir（含同一套可写校验），避免两处逻辑漂移。
+    /// </summary>
+    public string SetExportDirFromText(string dir)
+    {
+        try
+        {
+            // 传空字符串 = 恢复默认（用户想「重置」时不必知道默认路径长什么样）
+            if (string.IsNullOrWhiteSpace(dir))
+            {
+                _cfg.ExportDir = "";
+                AppPaths.Save(_cfg);
+                string def = AppPaths.ResolveExportDir(_cfg);
+                return J(new { ok = true, msg = "已恢复默认导出目录：" + def, dir = def, isDefault = true });
+            }
+
+            // 用户可能粘贴带引号的路径（从资源管理器「复制文件地址」得到）
+            string p = dir.Trim().Trim('"').Trim();
+            if (p.Length == 0) return J(new { ok = false, msg = "路径为空", dir = AppPaths.ResolveExportDir(_cfg) });
+            try { p = Path.GetFullPath(Environment.ExpandEnvironmentVariables(p)); }
+            catch (Exception ex) { return J(new { ok = false, msg = "路径格式不正确：" + ex.Message, dir = AppPaths.ResolveExportDir(_cfg) }); }
+
+            return SetExportDir(p);
+        }
+        catch (Exception e) { LogErr("SetExportDirFromText", e); return Err(e.Message); }
+    }
+
+    /// <summary>
+    /// 写入导出目录（唯一落盘点）。可写校验通过后才存，坏值绝不进 config。
+    /// v1.6.6 审查项：读取侧 AppPaths.ResolveExportDir 仍有独立兜底 —— 即便历史 config 里
+    /// 已存在坏值（手改 / 盘符被移除 / 权限变更），下载也不会失败，只会回退默认目录。
+    /// </summary>
+    private string SetExportDir(string dir)
+    {
+        // 校验可写：用户可能选了只读/无权限目录，坏值一旦存进 config 会挡住后续下载
+        try
+        {
+            Directory.CreateDirectory(dir);
+            string probe = Path.Combine(dir, ".txw_write_probe");
+            File.WriteAllText(probe, "ok");
+            File.Delete(probe);
+        }
+        catch (Exception ex)
+        {
+            return J(new { ok = false, msg = "该目录不可写：" + ex.Message + "（未保存）", dir = AppPaths.ResolveExportDir(_cfg) });
+        }
+
+        _cfg.ExportDir = dir;
+        AppPaths.Save(_cfg);
+        return J(new { ok = true, msg = "导出目录已设为：" + dir, dir, isDefault = false });
+    }
+
+    /// <summary>
+    /// 立即打开当前导出目录（界面上常驻的「打开文件夹」入口）。
+    /// 与 /api/download/open 的区别：后者传空时回退到「最近一次导出」，**从未导出过就会失败**；
+    /// 常驻卡片场景下用户可能还没导出过任何文件，故这里直接用解析后的导出目录。
+    /// </summary>
+    public string OpenExportDirNow()
+    {
+        string dir = AppPaths.ResolveExportDir(_cfg);
+        return J(new { ok = MainForm.OpenExportFolder(dir), dir });
     }
 
     /// <summary>
@@ -353,71 +471,181 @@ public sealed class UiBridge
                 return;
             }
             _cfg.ClientExe = exe; AppPaths.Save(_cfg);
-            Toast("客户端安装完成 ✅ " + exe);
+            long mb = info != null && info.Size > 0 ? info.Size / 1048576 : 0;
+            Toast("客户端安装完成 ✅ " + exe + (mb > 0 ? "　安装包（约 " + mb + " MB）已可删除，点【清理安装包】释放空间" : ""));
         }
         catch (Exception e) { Toast("安装客户端失败: " + e.Message); }
     }
 
-    public string AutoStart(string title, string proc, int intervalMs, string minConf, string dir)
+    /// <summary>列出 installer 目录里被判定为安装包的文件（供前端确认弹窗）。</summary>
+    public string InstallerInfo()
     {
-        var (ok, msg) = _auto.Start(title ?? "", proc ?? "", intervalMs, minConf ?? "mid", dir ?? "");
+        try
+        {
+            var files = ClientService.InstallerFiles();
+            long total = files.Sum(x => x.Size);
+            var arr = files.Select(x => new { name = Path.GetFileName(x.Path), size = x.Size, path = x.Path }).ToArray();
+            return J(new { ok = true, count = files.Count, totalBytes = total, totalMb = Math.Round(total / 1048576.0, 1), files = arr });
+        }
+        catch (Exception e) { LogErr("InstallerInfo", e); return Err("获取安装包信息失败: " + e.Message); }
+    }
+
+    /// <summary>手动删除 installer 目录里的安装包（只删判定为安装包者）。</summary>
+    public string ClearInstallers()
+    {
+        try
+        {
+            var (count, bytes) = ClientService.ClearInstallers();
+            if (count == 0) return J(new { ok = true, count = 0, bytes = 0L, msg = "没有可删除的安装包" });
+            var mb = Math.Round(bytes / 1048576.0, 1);
+            return J(new { ok = true, count, bytes, msg = $"已删除 {count} 个安装包，释放 {mb} MB" });
+        }
+        catch (Exception e) { LogErr("ClearInstallers", e); return Err("删除失败: " + e.Message); }
+    }
+
+    public string AutoStart(string title, string proc, int intervalMs, string minConf, string dir, string engine)
+    {
+        // 间隔缺省值按引擎取（前端漏传时不能退化成另一条路径的值：DOM 一轮毫秒级完成，OCR 默认 20 秒）
+        if (intervalMs <= 0)
+            intervalMs = string.Equals(engine, "dom", StringComparison.OrdinalIgnoreCase) ? _cfg.IntervalMsDom : _cfg.IntervalMs;
+
+        // 未装客户端时必须发 needInstall（与 AutoLaunch / AutoLaunchDom 同一套信号）：
+        // 否则 AutoService.Start 会返回「题库为空」，把"没装客户端"误报成"没打开试卷"。
+        // 已在运行但取不到路径（权限/架构差异）时不阻断，交给后续流程。
+        var found = ClientService.Find(_cfg);
+        if (found == null && !ClientService.AnyRunning())
+            return J(new { ok = false, needInstall = true, msg = "未检测到天学网客户端" });
+
+        // 自愈：把找到的正确路径回写（历史坏值 = 安装包路径，ConfigClientExe 已判无效，这里纠正落盘）
+        if (found != null && !string.Equals(_cfg.ClientExe, found, StringComparison.OrdinalIgnoreCase))
+        { _cfg.ClientExe = found; AppPaths.Save(_cfg); }
+
+        // 集成：开始自动回答时若 hosts 劫持接管未在运行，则自动拉起抓题库（失败仅记接管日志，不阻断作答）
+        if (!_mc.Running) { try { _mc.Start(); } catch { } }
+        var (ok, msg) = _auto.Start(title ?? "", proc ?? "", intervalMs, minConf ?? "mid", dir ?? "", engine ?? "ocr");
         return J(new { ok, msg });
+    }
+
+    /// <summary>
+    /// DOM 模式专用启动客户端：附加客户端源码级调试开关 --remote-debugging-port-u3=9222
+    /// （魔改 Electron 的改名开关，见 _research/DOM可行性研究结论.md），
+    /// 由本工具拉起后 DomEngine 才能通过 CDP 直连页面。
+    /// </summary>
+    public string AutoLaunchDom()
+    {
+        try
+        {
+            var exe = ClientService.Find(_cfg);
+            if (exe == null)
+            {
+                if (ClientService.AnyRunning())
+                    return J(new { ok = false, msg = "检测到客户端正在运行——请先【完全退出客户端】（含托盘），再点本按钮由工具带调试开关重启" });
+                return J(new { ok = false, needInstall = true, msg = "未检测到天学网客户端" });
+            }
+            // v1.3.5：同时开主进程 Node 调试口 --inspect=9229（逆向诊断用：dump 主进程模块源码/解密逻辑）
+            var msg = ClientService.Launch(exe,
+                "--remote-debugging-port-u3=" + CdpClient.DefaultPort + " --inspect=9229");
+            _cfg.ClientExe = exe; AppPaths.Save(_cfg);
+            return J(new { ok = true, msg });
+        }
+        catch (Exception e) { LogErr("AutoLaunchDom", e); return Err("后端启动失败: " + e.Message); }
     }
 
     public string AutoStop() { _auto.Stop(); return J(new { ok = true, msg = "停止中…" }); }
 
     public string AutoStatus() => J(_auto.Status());
 
-    public string GetConf() => J(new { ok = true, minConf = _cfg.MinConf, intervalMs = _cfg.IntervalMs });
+    public string GetConf() => J(new
+    {
+        ok = true,
+        minConf = _cfg.MinConf,
+        intervalMs = _cfg.IntervalMs,          // OCR 引擎
+        intervalMsDom = _cfg.IntervalMsDom,    // DOM 引擎（独立，默认为 1.5 秒）
+    });
 
-    public string SaveConf(string minConf, int intervalMs)
+    /// <summary>保存偏好。两条引擎路径的间隔各自独立：intervalMs=OCR、intervalMsDom=DOM（0 表示不改）。</summary>
+    public string SaveConf(string minConf, int intervalMs, int intervalMsDom = 0)
     {
         try
         {
             _cfg.MinConf = ConfLevelEx.Parse(minConf).Key();
             if (intervalMs >= 3000 && intervalMs <= 120000) _cfg.IntervalMs = intervalMs;
+            if (intervalMsDom >= 800 && intervalMsDom <= 120000) _cfg.IntervalMsDom = intervalMsDom;
             AppPaths.Save(_cfg);
-            return J(new { ok = true, msg = "已保存：最低置信度=" + ConfLevelEx.Parse(_cfg.MinConf).Name() + "，间隔=" + _cfg.IntervalMs + "ms" });
+            return J(new
+            {
+                ok = true,
+                msg = "已保存：最低置信度=" + ConfLevelEx.Parse(_cfg.MinConf).Name()
+                      + "，OCR 间隔=" + _cfg.IntervalMs + "ms，DOM 间隔=" + _cfg.IntervalMsDom + "ms"
+            });
         }
         catch (Exception e) { LogErr("SaveConf", e); return Err(e.Message); }
     }
 
-    // ---------- 抓包 ----------
-    public string CapStart() => J(new { ok = true, msg = _mitm.Start(8899) });
-    public string CapStop() => J(new { ok = true, msg = _mitm.Stop() });
+    // ---------- 假私有云（minicloud hosts 劫持 · 抓题库答案）----------
+    private readonly MiniCloudService _mc = new();
 
-    public string CapLaunch()
+    public string McStart() => J(new { ok = true, msg = _mc.Start() });
+    public string McStop() => J(new { ok = true, msg = _mc.Stop() });
+    public string McCache() => J(new { ok = true, msg = _mc.DeleteFlipbooks() });
+
+    /// <summary>清空抓包答案缓存（用户主动删除才删；不删则永久保留以扩大题库）。</summary>
+    public string McClear()
     {
-        try
-        {
-            var exe = ClientService.Find(_cfg);
-            if (exe == null) return Err("未检测到天学网客户端");
-            var msg = ClientService.Launch(exe);
-            _cfg.ClientExe = exe; AppPaths.Save(_cfg);
-            msg += "｜请把系统代理指向 127.0.0.1:8899 后重开客户端（仅记录不篡改流量）";
-            return J(new { ok = true, msg });
-        }
-        catch (Exception e) { LogErr("CapLaunch", e); return Err(e.Message); }
+        var msg = _mc.ClearAnswers();
+        BankService.ClearExternal();
+        return J(new { ok = true, msg });
     }
 
-    public string CapLog()
+    int McAnswerCount()
     {
-        try
-        {
-            string log = "(代理未运行)";
-            if (File.Exists(_mitm.LogPath))
-            {
-                using var fs = new FileStream(_mitm.LogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                using var sr = new StreamReader(fs);
-                log = sr.ReadToEnd();
-                if (log.Length > 12000) log = log[^12000..];
-            }
-            return J(new { log });
-        }
-        catch (Exception e) { LogErr("CapLog", e); return Err(e.Message); }
+        try { using var d = JsonDocument.Parse(File.ReadAllText(_mc.AnswersPath)); return d.RootElement.GetArrayLength(); }
+        catch { return 0; }
     }
 
-    public string CapTest() => J(new { ok = true, msg = _mitm.Running ? ("代理运行中（端口 " + _mitm.Port + "）") : "代理未运行" });
+    public string McStatus()
+    {
+        // 未运行时顺带做一次僵尸劫持自愈：hosts 有残留但本机 443 无人监听 → 立即清除，
+        // 否则客户端所有下载都会 ERR_CONNECTION_REFUSED。
+        if (!_mc.Running) _mc.RecoverStaleMarker();
+        return J(new
+        {
+            ok = true,
+            running = _mc.Running,
+            hijacked = _mc.Hijacked,
+            hostsStale = !_mc.Running && _mc.Hijacked,   // 前端据此提示"残留劫持，点停止接管可还原"
+            answers = McAnswerCount(),
+            words = WordBank.Count,
+            log = _mc.LogText
+        });
+    }
+
+    /// <summary>程序退出/关闭窗口时调用：停止自动答题并**确保 hosts 一定还原**（历史缺陷：关窗口不清 hosts）。</summary>
+    public void Shutdown()
+    {
+        try { _auto.Stop(); } catch { }
+        try { _mc.Dispose(); } catch { }
+    }
+
+    public string McList()
+    {
+        var items = new List<object>();
+        try
+        {
+            var di = new DirectoryInfo(_mc.CaptureDir);
+            if (di.Exists)
+                foreach (var f in di.GetFiles("*.bin").OrderByDescending(f => f.LastWriteTime).Take(50))
+                    items.Add(new { name = f.Name, size = f.Length, time = f.LastWriteTime.ToString("MM-dd HH:mm:ss") });
+        }
+        catch { }
+        return J(new { ok = true, items });
+    }
+
+    public string McAnswers()
+    {
+        try { return File.ReadAllText(_mc.AnswersPath); }
+        catch { return "[]"; }
+    }
 
     // ---------- 密钥 ----------
     public string Keys()
@@ -474,7 +702,8 @@ public sealed class UiBridge
             if (string.IsNullOrWhiteSpace(scanDir)) scanDir = _cfg.ScanDir;
             if (string.IsNullOrWhiteSpace(scanDir) || !Directory.Exists(scanDir))
             {
-                var d = JsonDocument.Parse(DefaultDir()).RootElement.GetProperty("dir").GetString() ?? "";
+                using var doc = JsonDocument.Parse(DefaultDir());
+                var d = doc.RootElement.GetProperty("dir").GetString() ?? "";
                 if (Directory.Exists(d)) scanDir = d;
             }
             var samples = new List<string>();
@@ -500,5 +729,101 @@ public sealed class UiBridge
             return J(new { ok = true, found = false, msg = "未在客户端中发现新密钥（内置密钥可能仍然有效）" });
         }
         catch (Exception e) { LogErr("DiscoverKeys", e); return Err(e.Message); }
+    }
+
+    /// <summary>
+    /// 密钥狩猎（对应 CLI <c>--keyhunt</c> 的单轮扫描）：扫描客户端进程内存，找出能解开本地
+    /// .u3enc 样本（V1/V2，题目数据排最前）的新密钥并自动并入 keys.json。
+    /// 与 CLI 的差别：CLI 会每 30 秒重扫、最多轮询 20 分钟（等用户打开目标练习），
+    /// 界面调用改为单轮即时返回 —— 未命中时提示用户保持练习页面稍后再点，避免请求挂起几十分钟。
+    /// 客户端是提权进程，读取其内存需要本程序以管理员运行（主程序已自提权）。
+    /// </summary>
+    public string HuntKeys(string dir)
+    {
+        try
+        {
+            CryptoService.Reload();
+            string scanDir = dir;
+            if (string.IsNullOrWhiteSpace(scanDir)) scanDir = _cfg.ScanDir;
+            if (string.IsNullOrWhiteSpace(scanDir) || !Directory.Exists(scanDir))
+            {
+                using var doc = JsonDocument.Parse(DefaultDir());
+                var d = doc.RootElement.GetProperty("dir").GetString() ?? "";
+                if (Directory.Exists(d)) scanDir = d;
+            }
+            string root = Program.DataRootOf(scanDir);
+            var samples = KeyFinder.CollectSamples(root);
+            if (samples.Count == 0)
+                return J(new { ok = false, found = false, msg = "没找到 .u3enc 样本——请先在客户端打开过课程/练习" });
+            var r = KeyFinder.HuntAndSave(samples);
+            bool found = r.FoundKeys.Count > 0;
+            return J(new
+            {
+                ok = true,
+                found,
+                sampleCount = samples.Count,
+                procs = r.ProcessesScanned,
+                msg = found
+                    ? r.Msg
+                    : r.Msg + "（未命中——请保持客户端处于目标练习页面，稍后再点一次）",
+            });
+        }
+        catch (Exception e) { LogErr("HuntKeys", e); return Err(e.Message); }
+    }
+
+    /// <summary>
+    /// 解密客户端代码/资源（对应 CLI <c>--u3edump all</c>）：借客户端原生 asar codec 导出
+    /// 磁盘 <c>*.u3e</c> 与 <c>*.u3a</c> 容器内部条目（含写有 V1/V2 密钥的 dist/main/index.js）。
+    /// 需客户端已由「启动客户端（调试模式）」带 <c>--inspect=9229</c> 拉起；对客户端目录只读，
+    /// 产物全部写到本工具数据目录 u3edump/，随后可被密钥扫描复用。进度经 toast 推送前端。
+    /// </summary>
+    public string DumpClient()
+    {
+        try
+        {
+            var exe = ClientService.Find(_cfg) ?? ClientService.ConfigClientExe(_cfg);
+            var r = U3eDumper.DumpAllAsync(exe ?? "", s => Toast(s)).GetAwaiter().GetResult();
+            return J(new { ok = r.Ok, count = r.Count, fail = r.Fail, outDir = r.OutDir, msg = r.Msg });
+        }
+        catch (Exception e) { LogErr("DumpClient", e); return Err(e.Message); }
+    }
+
+    // ---------- 作文报告（手动触发）----------
+
+    /// <summary>
+    /// 提取客户端里**已打开**的作文报告（对应界面「作文报告」页的按钮）。
+    /// 客户端里的报告页是远端 Web App；账号「写作」权益为试用型时，前端会给内容套上纯 CSS 遮罩
+    /// （马赛克 + 禁点击），但 DOM 文本完整 —— 本方法只做运行时「摘遮罩 + 临时揭示折叠区块」并导出，
+    /// **不写客户端任何文件、不改客户端代码**。产物（.txt 正文 + .html 自包含报告）落到导出目录。
+    /// 前置：客户端须由【启动客户端（调试模式）】拉起（开放调试端口 9222）。
+    /// </summary>
+    public string ReportExtract()
+    {
+        try
+        {
+            string dir = AppPaths.ResolveExportDir(_cfg);
+            var r = ReportExtractor.ExtractAsync(dir).GetAwaiter().GetResult();
+
+            // 只有真的落了盘才登记"最近导出"，否则「打开所在文件夹」会指向空路径
+            if (r.TxtPath.Length > 0) RecordExport?.Invoke(r.TxtPath);
+            if (r.Ok) Toast(r.Msg);
+
+            return J(new
+            {
+                ok = r.Ok,
+                msg = r.Msg,
+                text = r.Text,
+                chars = r.Chars,
+                url = r.Url,
+                html = r.HtmlPath,
+                txt = r.TxtPath,
+                dir,
+                blur = r.BlurRemoved,
+                revealed = r.Revealed,
+                tips = r.TipsHidden,
+                candidates = r.Candidates,
+            });
+        }
+        catch (Exception e) { LogErr("ReportExtract", e); return Err("提取作文报告失败: " + e.Message); }
     }
 }

@@ -27,6 +27,13 @@ public static class Matcher
 
     static List<string> Stem(string s) => NormQ(s).Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length > 3).ToList();
 
+    /// <summary>归一化题干词表（供 <see cref="BankItem.StemWords"/> 懒缓存调用，纯加速不改结果）。</summary>
+    internal static string[] StemWords(string s) => Stem(s).ToArray();
+
+    /// <summary>批量归一化选项文本（供 <see cref="BankItem.NormOpts"/> 懒缓存调用，剔除空项）。</summary>
+    internal static List<string> NormAll(IEnumerable<string> items)
+        => items.Select(NormQ).Where(x => x.Length > 0).ToList();
+
     /// <summary>把题库答案内容映射到本题选项（应对选项顺序打乱/轻微改写）。</summary>
     public static (string Ans, string Text, bool Mapped) MapAnsToTarget(string bankAnsText, List<string> targetOpts)
     {
@@ -46,17 +53,18 @@ public static class Matcher
         return (mapped ? "ABCD"[bestIdx].ToString() : "", mapped ? targetOpts[bestIdx] : "", mapped);
     }
 
-    static int OptScore(List<string> tOpts, List<string> bOpts)
+    /// <summary>选项打分：<paramref name="tOpts"/> 是页面原文（需归一化）；<paramref name="bNorm"/> 是题库侧
+    /// <b>已归一化</b>的选项（由 <see cref="BankItem.NormOpts"/> 懒缓存提供，避免每轮重复归一化）。</summary>
+    static int OptScore(List<string> tOpts, List<string> bNorm)
     {
-        var to = tOpts.Select(NormQ).Where(x => x.Length > 0).ToList();
-        var bo = bOpts.Select(NormQ).Where(x => x.Length > 0).ToList();
         int hit = 0;
+        var to = tOpts.Select(NormQ).Where(x => x.Length > 0).ToList();
         foreach (var t in to)
         {
             var w = t.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(x => x.Length > 3).ToList();
             if (w.Count == 0) continue;
             double best = 0;
-            foreach (var b in bo)
+            foreach (var b in bNorm)
             {
                 int s = w.Count(x => b.Contains(x, StringComparison.Ordinal));
                 best = Math.Max(best, (double)s / w.Count);
@@ -73,14 +81,14 @@ public static class Matcher
 
         foreach (var b in BankService.Items)
         {
-            var bw = Stem(b.Qt);
-            int ss = tw.Count(w => bw.Contains(w));
-            int os = OptScore(targetOpts, b.Opts);
+            // 题干/选项的归一化结果在 BankItem 内懒缓存（每轮对全库打分，实时归一化是主要开销）
+            int ss = tw.Count(w => b.StemWords.Contains(w));
+            int os = OptScore(targetOpts, b.NormOpts);
             double total = ss * 2 + os * 3;
             if (total > bs) { bs = total; best = b; bOpt = os; }
         }
 
-        bool stemOk = best != null && Stem(best.Qt).Count(w => tw.Contains(w)) >= 2;
+        bool stemOk = best != null && best.StemWords.Count(w => tw.Contains(w)) >= 2;
         bool optOk = bOpt >= 2;
 
         string conf = (stemOk && optOk) ? "高置信"
@@ -180,6 +188,19 @@ public static class Matcher
         return t.Length <= 3 ? BestOcrLineExact(t, lines) : BestOcrLine(t, lines);
     }
 
+    /// <summary>题干样行判定（v1.0.19）：以数字题号开头（"5. " / "5、" / "5)"）或以问号结尾。
+    /// 点击候选必须排除这类行 —— 题干与答案共用大量词（问 "What does the woman need to fix
+    /// her phone?" vs 答案含 "her phone"），词重叠打分会让题干行得分反超真正的选项行，
+    /// 用户实测兜底路径点到了题干本身（严重 bug）。</summary>
+    static bool IsStemLike(string s)
+    {
+        s = (s ?? "").Trim();
+        // A-D 前缀行是选项（对话补全题型选项本身可能是问句），永不视为题干
+        if (Regex.IsMatch(s, @"^[A-Da-d][.、)：:]\s*\S")) return false;
+        // (?!\d)：排除 "3.14" / "10:00" 这类以数字+标点+数字开头的选项（题号后不会紧跟数字）
+        return Regex.IsMatch(s, @"^\d{1,2}[.、)：:](?!\d)") || s.EndsWith("?") || s.EndsWith("？");
+    }
+
     /// <summary>
     /// 决策：给定 OCR 行与题库答案内容列表，找出应当点击的行。
     /// minConf 为用户选择的"最低置信度"：低于该档位的匹配直接跳过；
@@ -187,6 +208,9 @@ public static class Matcher
     /// </summary>
     public static ClickDecision? DecideClick(IReadOnlyList<OcrLine> lines, IReadOnlyList<string> ansTexts, ConfLevel minConf)
     {
+        // v1.0.19：点击候选剔除题干样行（数字开头/问号结尾）——防"点到题干"（见 IsStemLike 注释）。
+        var clickable = lines.Where(l => !IsStemLike(l.Text)).ToList();
+
         // 1) 解析成题 → 题库匹配 → 置信度门槛过滤
         var parsed = ParsePaperText(string.Join("\n", lines.Select(l => l.Text)));
         if (parsed.Count > 0)
@@ -196,7 +220,7 @@ public static class Matcher
             {
                 var r = MatchBank(q.Qt, q.Opts);
                 if (r.Level < minConf) continue;   // ← 置信度门槛
-                var m = MatchAnswerLine(r.BankAnsText, lines);   // 短答案精确匹配 / 长答案词重叠
+                var m = MatchAnswerLine(r.BankAnsText, clickable);   // 短答案精确匹配 / 长答案词重叠
                 if (m.Line != null && m.Score > bestScore)
                 { bestScore = m.Score; bestHit = m.Line; target = r.BankAnsText; bestConf = r.Conf; }
             }
@@ -208,7 +232,7 @@ public static class Matcher
         OcrLine? fb = null; double fbs = 0; string ft = "";
         foreach (var at in ansTexts)
         {
-            var m = MatchAnswerLine(at, lines);
+            var m = MatchAnswerLine(at, clickable);
             if (m.Line != null && m.Score > fbs) { fbs = m.Score; fb = m.Line; ft = at; }
         }
         return fb != null ? new ClickDecision(fb, ft, "fallback", "未命中(兜底)") : null;

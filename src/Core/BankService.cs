@@ -11,6 +11,15 @@ public sealed class BankItem
     public string Qt { get; set; } = "";
     public List<string> Opts { get; set; } = new();
     public string Ans { get; set; } = "";   // 正确选项字母（A/B/C/D）
+
+    // ---- 归一化缓存 ----
+    // MatchBank 每轮要对全库逐条打分（每轮 × 每题 × 每库条目），实时做正则归一化会重复成千上万次。
+    // 题干一经构建即不再变化，故懒计算一次即可；纯加速，不改变任何匹配结果。
+    private string[]? _stemWords;
+    private List<string>? _normOpts;
+
+    internal string[] StemWords => _stemWords ??= Matcher.StemWords(Qt);
+    internal List<string> NormOpts => _normOpts ??= Matcher.NormAll(Opts);
 }
 
 /// <summary>
@@ -21,8 +30,16 @@ public static class BankService
 {
     private static List<BankItem> _bank = new();
     private static string _bankKey = "";
+    // 抓包等外部来源并入的条目：持久留存，Build 重建扫描题库后自动重放，用户不清空就不丢。
+    private static readonly List<BankItem> _external = new();
     public static IReadOnlyList<BankItem> Items => _bank;
     public static int Count => _bank.Count;
+
+    // AnswerTexts() 会被 DomEngine 每轮每题调用；全库遍历去重必须缓存，否则每轮白做几千次。
+    static readonly object _gate = new();
+    static int _ver;
+    static List<string>? _ansCache;
+    static int _ansCacheVer = -1;
 
     static readonly JsonDocumentOptions JsonOpts = new() { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip };
 
@@ -83,11 +100,27 @@ public static class BankService
                             try
                             {
                                 var root = ParsePc(CryptoService.DecryptFile(f));
-                                if (root.HasValue && root.Value.TryGetProperty("questionObj", out var qo) &&
-                                    qo.TryGetProperty("questions_list", out var list) && list.ValueKind == JsonValueKind.Array)
-                                    foreach (var q in list.EnumerateArray())
-                                        Add(unitName[..Math.Min(10, unitName.Length)] + "-长对话",
-                                            Text(q, "question_text"), OptsOf(q), Text(q, "answer_text"), f);
+                                if (root.HasValue && root.Value.TryGetProperty("questionObj", out var qo))
+                                {
+                                    string tag = unitName[..Math.Min(10, unitName.Length)] + "-长对话";
+                                    // 形态①：questionObj.questions_list 是数组（一页多题）
+                                    if (qo.TryGetProperty("questions_list", out var list) && list.ValueKind == JsonValueKind.Array)
+                                        foreach (var q in list.EnumerateArray())
+                                            Add(tag, Text(q, "question_text"), OptsOf(q), Text(q, "answer_text"), f);
+                                    // 形态②：questionObj 本身就是一道题（question_text / options / answer_text 同级）
+                                    // 旧实现只认形态①，这类题目**一道都进不了题库**——实测 180 个文件里 80 个是形态②，
+                                    // 用户侧就表现为「未找到待作答选项」。补上这个分支即可。
+                                    // 设 TXW_NO_SINGLE=1 可临时关掉（用于 A/B 对比修复前后的入库量）
+                                    else if (Environment.GetEnvironmentVariable("TXW_NO_SINGLE") != "1")
+                                    {
+                                        var sOpts = OptsOf(qo).ToList();
+                                        var sAns = Text(qo, "answer_text");
+                                        // 形态②里混着「跟读/朗读」这类无选项、无答案的题（实测 qtype 110）：
+                                        // 它们入库后只有题干，匹配时会给出"命中但答案为空"的假匹配 → 只在有选项或有答案时入库
+                                        if (sOpts.Count > 0 || sAns.Length > 0)
+                                            Add(tag, Text(qo, "question_text"), sOpts, sAns, f);
+                                    }
+                                }
                             }
                             catch { }
                         }
@@ -103,6 +136,8 @@ public static class BankService
         // 现在：XmlDocument 只取 <element type="3"> 题目节点；<answers> 从 correctAnswer.xml 按 id 关联。
         foreach (var courseDir in Directory.EnumerateDirectories(resourcesDir))
         {
+            // 与 ScanService 保持一致：cache / personal_practice 是客户端缓存与自主练习目录，不入库
+            if (Path.GetFileName(courseDir) is "cache" or "personal_practice") continue;
             string paper = Path.Combine(courseDir, "paper.xml.u3enc");
             if (!File.Exists(paper)) continue;
             try
@@ -153,21 +188,73 @@ public static class BankService
             catch { }
         }
 
+        // 重放外部缓存条目（抓包答案）：扫描题库整体替换后，持久缓存的抓包条目不能丢
+        var existKeys = new HashSet<string>(bank.Select(b => NormKey(b.Qt)));
+        foreach (var e in _external)
+            if (existKeys.Add(NormKey(e.Qt))) bank.Add(e);
+
         _bank = bank;
         _bankKey = key;
+        _ver++;
         return _bank.Count;
     }
 
-    /// <summary>题库中所有带答案的选项内容（去重），供兜底匹配使用。</summary>
+    /// <summary>题库中所有带答案的选项内容（去重），供兜底匹配使用。
+    /// 结果按题库版本缓存 —— DomEngine 每轮每题都会取一次，返回值<b>只读</b>，调用方不要修改。</summary>
     public static List<string> AnswerTexts()
     {
-        var set = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var b in _bank)
+        lock (_gate)
         {
-            int i = "ABCD".IndexOf(b.Ans, StringComparison.Ordinal);
-            if (i >= 0 && i < b.Opts.Count) set.Add(b.Opts[i]);
+            if (_ansCache != null && _ansCacheVer == _ver) return _ansCache;
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var b in _bank)
+            {
+                int i = "ABCD".IndexOf(b.Ans, StringComparison.Ordinal);
+                if (i >= 0 && i < b.Opts.Count) set.Add(b.Opts[i]);
+            }
+            _ansCache = set.ToList();
+            _ansCacheVer = _ver;
+            return _ansCache;
         }
-        return set.ToList();
+    }
+
+    /// <summary>
+    /// 把外部来源（如「无痕下载接管」抓包解析出的答案）并入题库，供「自动回答」视觉引擎匹配。
+    /// 抓包答案只有选项文本、没有选项字母，统一记为 Opts=[答案文本] / Ans="A"，
+    /// 这样 AnswerTexts() 会自动把答案文本纳入待选集合，自动回答无需重启即可用上。
+    /// </summary>
+    public static int MergeExternal(IEnumerable<(string qt, string ans)> items, string src = "抓包")
+    {
+        var added = 0;
+        var exist = new HashSet<string>(_bank.Select(b => NormKey(b.Qt)));
+        foreach (var (qt, ans) in items)
+        {
+            var q = (qt ?? "").Trim();
+            var a = (ans ?? "").Trim();
+            if (q.Length < 4 || a.Length == 0) continue;
+            if (!exist.Add(NormKey(q))) continue;
+            var item = new BankItem { Src = src, SrcFile = src, Qt = q, Opts = new List<string> { a }, Ans = "A" };
+            _bank.Add(item);
+            _external.Add(item);   // 同步留存：Build 重建后自动重放
+            added++;
+        }
+        if (added > 0) _ver++;
+        return added;
+    }
+
+    /// <summary>清空外部缓存条目（用户主动清空答案缓存时调用）。</summary>
+    public static void ClearExternal()
+    {
+        _external.Clear();
+        _bank.RemoveAll(b => b.Src == "抓包");
+        _ver++;
+    }
+
+    internal static string NormKey(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var t = StripTags(s).ToLowerInvariant();
+        return Regex.Replace(t, @"[^a-z0-9\u4e00-\u9fff]+", "");
     }
 
     // ---------- 工具 ----------
